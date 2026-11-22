@@ -51,13 +51,18 @@ import {
 } from "./lib/domain";
 import type { RiskAssessment } from "./lib/domain";
 import { analyzeContract, type AnalysisResult } from "./lib/api";
-import { loadContracts, saveContracts, todayISO } from "./lib/store";
-import type { Contract, Milestone, MilestoneType } from "./lib/store";
+import { todayISO } from "./lib/store";
+import type { Contract, MilestoneType } from "./lib/store";
+import { readContractFile } from "./lib/files";
 import {
+  addMilestone as saveMilestone,
+  createClaim,
+  createContract,
   downloadEvidence,
-  readContractFile,
-  storeEvidenceFile,
-} from "./lib/files";
+  downloadReportPdf,
+  loadWorkspace,
+  type Audience,
+} from "./lib/backend";
 
 type Page =
   "dashboard" | "contracts" | "evaluation" | "tracking" | "claims" | "evidence";
@@ -80,15 +85,23 @@ const milestoneNames: Record<MilestoneType, string> = {
   traspaso: "Traspaso del vehículo",
 };
 function financial(c: Contract) {
+  const s = c.server;
+  if (s)
+    return {
+      commission: s.comision,
+      netAmount: s.neto,
+      totalPaid: s.total_pagado,
+      balance: s.saldo,
+    };
   return calculateBalance(
     c.price,
     c.commission,
     c.milestones.filter((m) => m.type === "pago").map((m) => m.amount || 0),
   );
 }
+/** Vencimiento calculado por el backend (holidays de Chile); null si aún no hay venta. */
 function deadline(c: Contract) {
-  const sale = c.milestones.find((m) => m.type === "venta");
-  return sale ? addBusinessDays(sale.date, c.paymentDays) : null;
+  return c.server?.vencimiento ?? null;
 }
 function contractStatus(c: Contract) {
   const money = financial(c);
@@ -103,23 +116,10 @@ function contractStatus(c: Contract) {
   return { label: "En consignación", tone: "success" };
 }
 function isUnsafe(c: Contract) {
-  const transfer = c.milestones.find((m) => m.type === "traspaso");
-  if (!transfer) return false;
-  return (
-    calculateBalance(
-      c.price,
-      c.commission,
-      c.milestones
-        .filter((m) => m.type === "pago" && m.date <= transfer.date)
-        .map((m) => m.amount || 0),
-    ).balance > 0
-  );
+  return c.server?.traspaso_inseguro ?? false;
 }
 function isClaimable(c: Contract) {
-  return (
-    financial(c).balance > 0 &&
-    (isUnsafe(c) || (!!deadline(c) && (deadline(c) as string) < todayISO()))
-  );
+  return c.server?.reclamable ?? false;
 }
 function VehicleIcon({ index = 0 }: { index?: number }) {
   return (
@@ -205,18 +205,33 @@ function CarIllustration() {
 }
 
 export default function App() {
-  const [contracts, setContracts] = useState<Contract[]>(loadContracts);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [loadError, setLoadError] = useState("");
   const [page, setPage] = useState<Page>("dashboard");
-  const [selectedId, setSelectedId] = useState("CT-001");
+  const [selectedId, setSelectedId] = useState("");
   const [dialog, setDialog] = useState<Dialog>(null);
   const [query, setQuery] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [toast, setToast] = useState("");
-  const [storageWarn, setStorageWarn] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const load = useCallback(async () => {
+    setLoadState("loading");
+    try {
+      const list = await loadWorkspace();
+      setContracts(list);
+      setSelectedId((id) => (list.some((c) => c.id === id) ? id : list[0]?.id ?? ""));
+      setLoadState("ready");
+    } catch (e) {
+      setLoadError((e as Error).message);
+      setLoadState("error");
+    }
+  }, []);
   useEffect(() => {
-    setStorageWarn(!saveContracts(contracts));
-  }, [contracts]);
+    void load();
+  }, [load]);
   useEffect(() => {
     if (toast) {
       const timer = setTimeout(() => setToast(""), 4500);
@@ -262,15 +277,37 @@ export default function App() {
     navigate("contracts", c.id);
     setToast("Contrato creado. Ya puedes evaluar sus términos.");
   }
-  function addMilestone(m: Milestone) {
-    setContracts((old) =>
-      old.map((c) =>
-        c.id === dialog?.id ? { ...c, milestones: [...c.milestones, m] } : c,
-      ),
-    );
+  function addMilestone(updated: Contract) {
+    setContracts((old) => old.map((c) => (c.id === updated.id ? updated : c)));
     setDialog(null);
     setToast("Hito guardado en la cronología.");
   }
+  if (loadState !== "ready")
+    return (
+      <div className="app-shell">
+        <main role="status" aria-live="polite">
+          {loadState === "loading" ? (
+            <Empty
+              title="Conectando con el servidor…"
+              description="Cargando tus contratos de demostración."
+            />
+          ) : (
+            <Empty
+              title="No pudimos cargar tus datos"
+              description={loadError}
+              action={
+                <button
+                  className="button button-primary"
+                  onClick={() => void load()}
+                >
+                  Reintentar
+                </button>
+              }
+            />
+          )}
+        </main>
+      </div>
+    );
   return (
     <div className="app-shell">
       {mobileOpen && (
@@ -379,15 +416,9 @@ export default function App() {
             <span />
             <span>Espacio de demostración</span>
             <span className="demo-label-detail">
-              Tus datos se guardan solo en este navegador
+              Cuenta de demostración compartida · datos guardados en el servidor
             </span>
           </div>
-          {storageWarn && (
-            <div className="notice notice-warning">
-              No se pudo guardar en el navegador. Mantén esta página abierta
-              para conservar los cambios.
-            </div>
-          )}
           {query ? (
             <>
               <div className="page-heading">
@@ -1668,9 +1699,13 @@ function Claims({
   onTrack: () => void;
   notify: (s: string) => void;
 }) {
-  const [generated, setGenerated] = useState(false);
-  const [audience, setAudience] = useState("automotora");
-  useEffect(() => setGenerated(false), [c?.id]);
+  const [draft, setDraft] = useState<{
+    text: string;
+    notice: string;
+  } | null>(null);
+  const [audience, setAudience] = useState<Audience>("automotora");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setDraft(null), [c?.id, audience]);
   if (!c)
     return (
       <Empty
@@ -1682,43 +1717,24 @@ function Claims({
   const eligible = isClaimable(c);
   const due = deadline(c);
   const events = [...c.milestones].sort((a, b) => a.date.localeCompare(b.date));
-  const body = `${audience === "automotora" ? `A ${c.dealer}` : "Al Servicio Nacional del Consumidor (SERNAC)"}:\n\nPor medio de este documento, dejo constancia de los antecedentes relacionados con la consignación de mi vehículo ${c.vehicle}, patente ${c.plate}, registrada con ${c.dealer}.\n\nEl precio de venta registrado es ${formatCLP(c.price)}, con una comisión de ${c.commission}% (${formatCLP(balance.commission)}), lo que corresponde a un monto neto de ${formatCLP(balance.netAmount)}. A la fecha, los pagos registrados suman ${formatCLP(balance.totalPaid)}, con un saldo pendiente de ${formatCLP(balance.balance)}.${due ? ` La fecha de vencimiento de referencia es ${formatDate(due)}.` : ""}\n\n${isUnsafe(c) ? "En la cronología se registra un traspaso previo al pago completo. Solicito aclarar esta situación y entregar los comprobantes correspondientes.\n\n" : ""}Solicito informar por escrito el estado de la operación y, si corresponde, regularizar el saldo pendiente mediante el medio de pago acordado.\n\nAdjunto la cronología y las referencias a los comprobantes disponibles. Solicito una respuesta por escrito a este requerimiento.\n\nNombre del propietario: ____________________\nFecha: ${formatDate(todayISO())}\nDatos de contacto: ____________________`;
+  /** El borrador lo redacta el backend con los hechos y montos calculados en el servidor. */
+  async function generateDraft() {
+    setBusy(true);
+    try {
+      const result = await createClaim(c!.id, audience);
+      setDraft({ text: result.borrador, notice: result.aviso });
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function exportPDF() {
     try {
-      const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF();
-      let y = 22;
-      const write = (text: string, size = 10) => {
-        doc.setFontSize(size);
-        for (const line of doc.splitTextToSize(text, 170)) {
-          if (y > 275) {
-            doc.addPage();
-            y = 22;
-          }
-          doc.text(line, 20, y);
-          y += size * 0.52;
-        }
-        y += 5;
-      };
-      write("CONSIGNA | Informe y borrador de reclamo", 17);
-      write("BORRADOR PARA REVISIÓN. No presentado ni enviado.", 10);
-      write(`${c!.vehicle} | ${c!.plate} | ${c!.dealer}`, 12);
-      write("CRONOLOGÍA", 12);
-      events.forEach((m) =>
-        write(
-          `${formatDate(m.date)} - ${milestoneNames[m.type]}${m.amount ? ` - ${formatCLP(m.amount)}` : ""}\n${m.note}${m.evidence ? `\nComprobante: ${m.evidence.name}` : ""}`,
-        ),
-      );
-      write("BORRADOR DE RECLAMO", 12);
-      write(body);
-      write(
-        "Documento de demostración. No valida fundamentos normativos ni sustituye asesoría jurídica. Verificar el calendario y adjuntar los comprobantes antes de presentar.",
-        9,
-      );
-      doc.save(`consigna-informe-${c!.id}.pdf`);
+      await downloadReportPdf(c!.id, audience);
       notify("PDF descargado. Revísalo antes de presentarlo.");
-    } catch {
-      notify("No se pudo generar el PDF. Intenta nuevamente.");
+    } catch (e) {
+      notify((e as Error).message || "No se pudo generar el PDF. Intenta nuevamente.");
     }
   }
   return (
@@ -1821,7 +1837,7 @@ function Claims({
               ].map(({ id, label, icon: Icon }) => (
                 <button
                   className={audience === id ? "recipient-active" : ""}
-                  onClick={() => setAudience(id)}
+                  onClick={() => setAudience(id as Audience)}
                   key={id}
                 >
                   <Icon size={17} />
@@ -1829,17 +1845,17 @@ function Claims({
                 </button>
               ))}
             </div>
-            {generated ? (
+            {draft ? (
               <>
                 <div className="draft-paper">
                   <span className="draft-tag">BORRADOR · NO PRESENTADO</span>
                   <h3>Solicitud de regularización de pago</h3>
-                  <p>{body}</p>
+                  <p>{draft.text}</p>
                 </div>
                 <div className="notice notice-warning">
-                  Revisa los hechos y agrega tus datos. Este borrador no
-                  contiene fundamentos jurídicos validados. Adjunta los
-                  comprobantes antes de presentarlo.
+                  Revisa los hechos y agrega tus datos. Verifica los
+                  fundamentos citados (aún sin validación de un abogado) y
+                  adjunta los comprobantes antes de presentarlo.
                 </div>
                 <button
                   className="button button-primary button-full"
@@ -1859,9 +1875,14 @@ function Claims({
                 </p>
                 <button
                   className="button button-primary"
-                  onClick={() => setGenerated(true)}
+                  disabled={busy}
+                  onClick={() => void generateDraft()}
                 >
-                  <FileText size={16} />
+                  {busy ? (
+                    <LoaderCircle size={16} className="spin" />
+                  ) : (
+                    <FileText size={16} />
+                  )}
                   Generar borrador
                 </button>
               </div>
@@ -2055,32 +2076,20 @@ function NewContract({
     }
     setBusy(true);
     try {
-      const c: Contract = {
-        id: `CT-${crypto.randomUUID().slice(0, 6).toUpperCase()}`,
+      const input = {
         vehicle: String(data.get("vehicle")).trim(),
         plate: String(data.get("plate")).trim().toUpperCase(),
         dealer: String(data.get("dealer")).trim(),
         price,
         commission,
         paymentDays: days,
-        createdAt: todayISO(),
         text,
-        milestones: [],
       };
-      if (!c.vehicle || !c.dealer || !c.plate) {
+      if (!input.vehicle || !input.dealer || !input.plate) {
         setError("Completa el vehículo, la patente y la automotora.");
         return;
       }
-      if (evidence) {
-        const id = await storeEvidenceFile(evidence);
-        c.original = {
-          id,
-          name: evidence.name,
-          size: evidence.size,
-          date: todayISO(),
-        };
-      }
-      onSave(c);
+      onSave(await createContract(input, evidence));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -2225,7 +2234,7 @@ function MilestoneForm({
 }: {
   contract: Contract;
   close: () => void;
-  onSave: (m: Milestone) => void;
+  onSave: (c: Contract) => void;
 }) {
   const [type, setType] = useState<MilestoneType>("pago");
   const [file, setFile] = useState<File | null>(null);
@@ -2304,19 +2313,16 @@ function MilestoneForm({
     }
     setBusy(true);
     try {
-      let evidence: Milestone["evidence"];
-      if (file) {
-        const id = await storeEvidenceFile(file);
-        evidence = { id, name: file.name, size: file.size, date };
-      }
-      onSave({
-        id: crypto.randomUUID(),
-        type,
-        date,
-        note: String(data.get("note")).trim(),
-        amount,
-        evidence,
-      });
+      onSave(
+        await saveMilestone(c.id, {
+          type,
+          date,
+          note: String(data.get("note")).trim(),
+          amount,
+          file,
+          confirm: Boolean(data.get("confirm")),
+        }),
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -2414,12 +2420,12 @@ function MilestoneForm({
           <Upload size={19} />
           <div>
             <strong>{file?.name || "Adjuntar comprobante"}</strong>
-            <span>PDF, imagen o TXT · Máximo 10 MB</span>
+            <span>PDF, PNG, JPG o TXT · Máximo 10 MB</span>
           </div>
           <input
             id="milestone-file"
             type="file"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,.txt"
+            accept=".pdf,.jpg,.jpeg,.png,.txt"
             onChange={(e) => {
               setFile(e.target.files?.[0] || null);
               setError("");
