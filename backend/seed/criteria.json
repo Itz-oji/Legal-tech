@@ -2,7 +2,7 @@
   "version": 1,
   "published_at": "2026-11-21T00:00:00+00:00",
   "status": "seed",
-  "notes": "Criterios iniciales derivados de las reglas del frontend y de las fuentes SERNAC/BCN. Pendientes de validación jurídica.",
+  "notes": "Criterios iniciales. Rev. 2: el plazo de pago solo considera cláusulas de pago; el traspaso reconoce 'transferencia del dominio'; la rebaja reconoce 'ajustar el precio'.",
   "sources": [
     {
       "id": "ley-19496",
@@ -96,8 +96,9 @@
       "id": "payment-term",
       "title": "Plazo de pago",
       "detect": [
-        "\\d+\\s*dias",
-        "plazo de pago"
+        "plazo de pago",
+        "pag(?:o|ar|ara|aran|ado|ados|ada|adas)\\b.{0,80}\\d+\\s*dias",
+        "\\d+\\s*dias.{0,80}\\bpag(?:o|ar|ara|aran|ado|ados|ada|adas)\\b"
       ],
       "required": true,
       "default_level": "medio",
@@ -148,14 +149,17 @@
       "id": "price-reduction",
       "title": "Autorización para rebajar",
       "detect": [
-        "rebaj|reducir el precio|descuento"
+        "rebaj|reducir el precio|descuento",
+        "ajust\\w*\\s+(?:el\\s+)?precio",
+        "modific\\w*\\s+(?:el\\s+)?precio",
+        "variar\\s+(?:el\\s+)?precio"
       ],
       "required": true,
       "default_level": "medio",
       "rules": [
         {
           "level": "alto",
-          "match": "sin\\s+(?:consult|autoriz)|libremente|unilateral",
+          "match": "sin\\s+(?:necesidad\\s+de\\s+)?(?:consult|autoriz|aviso)|libremente|unilateral|a su (?:entera |exclusiva |sola )?(?:discrecion|arbitrio)",
           "unless": "\\bno\\s+(?:se\\s+)?(?:podra|puede|debera|debe).{0,45}(?:rebaj|reducir|descuento).{0,50}sin\\s+(?:consult|autoriz)",
           "explanation": "Se detectó una referencia a decisiones sin autorización. Revisa si permite rebajas sin tu consentimiento."
         },
@@ -185,11 +189,18 @@
       "title": "Condiciones del traspaso",
       "detect": [
         "traspas",
-        "transferencia de dominio"
+        "transferencia (?:de|del) dominio",
+        "dominio.{0,80}transfer",
+        "transfer\\w*.{0,60}dominio"
       ],
       "required": true,
       "default_level": "alto",
       "rules": [
+        {
+          "level": "alto",
+          "match": "(?:determine|fije|fijen|establezca)\\s+posteriormente|no se encuentra[n]?\\s+especificad",
+          "explanation": "El traspaso se condiciona al pago de cargos que no están especificados o que se fijarán después. Exige que todos los montos estén definidos en el contrato antes de firmar."
+        },
         {
           "level": "alto",
           "match": "(?:antes|previo|sin).{0,35}(?:pago|abono)",
@@ -309,5 +320,6 @@
       "review_status": "pending_legal_review",
       "absent_level": "alto"
     }
-  ]
+  ],
+  "seed_revision": 2
 }
