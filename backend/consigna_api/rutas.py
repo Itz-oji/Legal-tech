@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 from datetime import date
 
@@ -58,7 +59,6 @@ def errores_pydantic(e: ValidationError):
     return error("Revisa los datos ingresados.", 422, detalles=campos)
 
 
-# ---- usuarios --------------------------------------------------------------
 @bp.post("/api/auth/register")
 def register():
     d = cuerpo()
@@ -90,6 +90,25 @@ def login():
     return jsonify(token=auth.emitir_token(u["id"]), usuario={"id": u["id"], "email": u["email"], "nombre": u["name"]})
 
 
+@bp.post("/api/auth/demo")
+def demo():
+    """Modo demostración (DEMO_MODE=1): entrega un token de una cuenta compartida, sin pantalla de login.
+    Cualquiera que llegue al servidor entra a esa cuenta: no usar con datos reales."""
+    if not current_app.config.get("DEMO_MODE"):
+        return error("El modo demostración está deshabilitado.", 404)
+    email = current_app.config["DEMO_EMAIL"].strip().lower()
+    u = repos.usuario_por_email(S().db, email)
+    if not u:
+        try:
+            nuevo = repos.crear_usuario(S().db, email, "Cuenta de demostración", auth.hash_password(secrets.token_urlsafe(24)))
+            u = {"id": nuevo["id"], "email": email, "name": nuevo["nombre"]}
+        except Exception:  # dos primeras visitas simultáneas: la otra ya la creó
+            u = repos.usuario_por_email(S().db, email)
+            if not u:
+                raise
+    return jsonify(token=auth.emitir_token(u["id"]), usuario={"id": u["id"], "email": u["email"], "nombre": u["name"]})
+
+
 @bp.get("/api/me")
 @auth.login_required
 def me():
@@ -97,7 +116,6 @@ def me():
     return jsonify(id=u["id"], email=u["email"], nombre=u["name"]) if u else error("Usuario no encontrado.", 404)
 
 
-# ---- contratos -------------------------------------------------------------
 def _contrato_o_404(cid):
     c = repos.obtener_contrato(S().db, g.user_id, cid)
     return c, (None if c else error("Contrato no encontrado.", 404))
@@ -105,6 +123,13 @@ def _contrato_o_404(cid):
 
 def _salida(c: dict) -> dict:
     return {k: v for k, v in c.items() if k != "user_id"}
+
+
+def _completo(c: dict) -> dict:
+    """Contrato con sus hitos, comprobantes, contrato original y estado calculado (plazos y montos en código)."""
+    hitos = repos.hitos_de(S().db, c["id"])
+    return {**_salida(c), "hitos": hitos, "evidencias": repos.evidencias_de(S().db, c["id"]),
+            "original": repos.original_de(S().db, c["id"]), "estado": informes.estado_de(c, hitos, S().hoy())}
 
 
 @bp.post("/api/contracts")
@@ -127,6 +152,8 @@ def crear_contrato():
 @bp.get("/api/contracts")
 @auth.login_required
 def listar():
+    if verdadero(request.args.get("completo")):
+        return jsonify(contratos=[_completo(c) for c in repos.listar_contratos(S().db, g.user_id)])
     return jsonify(contratos=[_salida(c) for c in repos.listar_contratos(S().db, g.user_id)])
 
 
@@ -136,9 +163,9 @@ def detalle(cid):
     c, err = _contrato_o_404(cid)
     if err:
         return err
-    hitos = repos.hitos_de(S().db, cid)
-    est = informes.estado_de(c, hitos, S().hoy())
-    return jsonify(contrato=_salida(c), hitos=hitos, estado=est)
+    completo = _completo(c)
+    return jsonify(contrato=_salida(c), hitos=completo["hitos"], estado=completo["estado"],
+                   evidencias=completo["evidencias"], original=completo["original"])
 
 
 @bp.delete("/api/contracts/<cid>")
@@ -150,6 +177,31 @@ def borrar(cid):
     for uid, nombre in repos.borrar_contrato(S().db, g.user_id, cid):
         S().almacen.borrar(uid, nombre)
     return "", 204
+
+
+@bp.put("/api/contracts/<cid>/original")
+@auth.login_required
+def subir_original(cid):
+    """Adjunta (o reemplaza) el archivo del contrato original, que no corresponde a ningún hito."""
+    c, err = _contrato_o_404(cid)
+    if err:
+        return err
+    archivo = request.files.get("archivo")
+    if not archivo:
+        return error("Adjunta el contrato en el campo 'archivo'.", 422)
+    try:
+        meta = S().almacen.guardar(g.user_id, archivo.filename or "", archivo.read())
+    except EvidenciaInvalida as e:
+        return error(str(e), 422)
+    try:
+        previos = repos.reemplazar_original(S().db, cid)
+        ev = repos.crear_evidencia(S().db, g.user_id, cid, meta)
+    except Exception:
+        S().almacen.borrar(g.user_id, meta["stored_name"])
+        raise
+    for uid, nombre in previos:
+        S().almacen.borrar(uid, nombre)
+    return jsonify(original=ev), 201
 
 
 @bp.post("/api/contracts/<cid>/analyze")
@@ -165,7 +217,6 @@ def analizar_guardado(cid):
     return jsonify(criteria_version=doc["version"], findings=engine.analyze(c["texto"], doc, flags), review_pending=bool(flags))
 
 
-# ---- hitos y evidencias ----------------------------------------------------
 @bp.get("/api/contracts/<cid>/milestones")
 @auth.login_required
 def listar_hitos(cid):
@@ -228,7 +279,6 @@ def descargar(eid):
     return send_file(ruta, mimetype=e["mime"], as_attachment=True, download_name=e["filename"])
 
 
-# ---- informe y reclamo -----------------------------------------------------
 def _informe(cid):
     c, err = _contrato_o_404(cid)
     if err:
@@ -282,7 +332,6 @@ def informe_pdf(cid):
     return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True, download_name=f"informe-{audiencia}.pdf")
 
 
-# ---- administración --------------------------------------------------------
 @bp.post("/api/admin/alerts/run")
 def correr_alertas():
     denegado = current_app.extensions["admin_only"]()
