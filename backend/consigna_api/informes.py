@@ -10,7 +10,7 @@ from .hitos import clp
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 TIPO_HITO = {"entrega": "Entrega del vehículo", "venta": "Venta informada", "pago": "Pago recibido", "traspaso": "Traspaso"}
 AUDIENCIAS = ("automotora", "sernac")
-# Solo se citan las normas que el proyecto referencia; deben verificarse antes de presentar.
+# Solo se citan las normaS, deben verificarse antes de presentar.
 FUNDAMENTOS = [
     "Código Civil, art. 1545: todo contrato legalmente celebrado es una ley para los contratantes.",
     "Código de Comercio, art. 279: obligaciones del comisionista tras evacuar la negociación (rendición de cuentas y entrega del saldo), cuando la operación se configure como comisión comercial.",
