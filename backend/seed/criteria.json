@@ -1,0 +1,313 @@
+{
+  "version": 1,
+  "published_at": "2026-11-21T00:00:00+00:00",
+  "status": "seed",
+  "notes": "Criterios iniciales derivados de las reglas del frontend y de las fuentes SERNAC/BCN. Pendientes de validación jurídica.",
+  "sources": [
+    {
+      "id": "ley-19496",
+      "title": "Ley 19.496 sobre Protección de los Derechos de los Consumidores (BCN)",
+      "url": "https://www.bcn.cl/leychile/navegar?idLey=19496",
+      "kind": "norma",
+      "monitor": true
+    },
+    {
+      "id": "sernac-publicacion-84008",
+      "title": "Publicación institucional del SERNAC (w3-article-84008)",
+      "url": "https://www.sernac.cl/portal/604/w3-article-84008.html",
+      "kind": "sernac",
+      "monitor": true
+    },
+    {
+      "id": "sernac-circulares",
+      "title": "SERNAC · Circulares interpretativas",
+      "url": "https://sernac.cl/portal/618/w3-propertyvalue-21072.html",
+      "kind": "sernac",
+      "monitor": true
+    },
+    {
+      "id": "sernac-dictamenes",
+      "title": "SERNAC · Dictámenes interpretativos",
+      "url": "https://www.sernac.cl/618/w3-propertyvalue-66262.html",
+      "kind": "sernac",
+      "monitor": true
+    },
+    {
+      "id": "sernac-vehiculos",
+      "title": "SERNAC · Recomendaciones y derechos en la compra de vehículos",
+      "url": "https://www.sernac.cl/604/w3-propertyvalue-66795.html",
+      "kind": "sernac",
+      "monitor": true
+    }
+  ],
+  "criteria": [
+    {
+      "id": "minimum-price",
+      "title": "Precio mínimo de venta",
+      "detect": [
+        "precio minimo|valor minimo|minimo de venta"
+      ],
+      "required": true,
+      "default_level": "bajo",
+      "rules": [],
+      "explanation": "Se menciona un precio mínimo. Verifica que el monto esté expresado en pesos y sea inequívoco.",
+      "alternative": "El vehículo no podrá venderse por un precio inferior al mínimo acordado por escrito por el propietario.",
+      "references": [
+        {
+          "source_id": "sernac-vehiculos",
+          "label": "Información clara de las condiciones de contratación"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto",
+      "absent_explanation": "No se identificó este término en el texto. Su ausencia debe revisarse expresamente antes de firmar."
+    },
+    {
+      "id": "commission",
+      "title": "Comisión de la automotora",
+      "detect": [
+        "comision"
+      ],
+      "required": true,
+      "default_level": "medio",
+      "rules": [
+        {
+          "level": "alto",
+          "match": "comision.{0,80}(adicional|variable|unilateral)"
+        }
+      ],
+      "explanation": "Confirma el porcentaje o monto de la comisión, su base de cálculo y si incluye impuestos y gastos.",
+      "alternative": "La comisión total será de [porcentaje]% del precio de venta, con todos sus cargos expresamente detallados.",
+      "references": [
+        {
+          "source_id": "ley-19496",
+          "label": "Información básica comercial y cobros"
+        },
+        {
+          "source_id": "sernac-circulares",
+          "label": "Cláusulas que permiten cobros o variaciones unilaterales"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto",
+      "absent_explanation": "No se identificó este término en el texto. Su ausencia debe revisarse expresamente antes de firmar."
+    },
+    {
+      "id": "payment-term",
+      "title": "Plazo de pago",
+      "detect": [
+        "\\d+\\s*dias",
+        "plazo de pago"
+      ],
+      "required": true,
+      "default_level": "medio",
+      "rules": [
+        {
+          "level": "alto",
+          "number_gt": {
+            "pattern": "(\\d+)\\s*dias",
+            "threshold": 15
+          },
+          "explanation": "El plazo supera los 15 días, referencia interna de este servicio (no es un límite legal). Un plazo mayor aumenta la exposición del propietario."
+        }
+      ],
+      "explanation": "Confirma el plazo, si son días hábiles o corridos y desde cuándo se cuenta. El umbral de 15 días es una referencia interna, no un máximo legal.",
+      "alternative": "El precio neto se pagará dentro de [plazo acordado] días desde la venta, indicando si son hábiles o corridos.",
+      "references": [
+        {
+          "source_id": "sernac-vehiculos",
+          "label": "Información sobre medios y condiciones del contrato"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto",
+      "absent_explanation": "No se identificó este término en el texto. Su ausencia debe revisarse expresamente antes de firmar."
+    },
+    {
+      "id": "payment-method",
+      "title": "Forma de pago",
+      "detect": [
+        "transferencia bancaria|cuenta bancaria|forma de pago|deposito bancario"
+      ],
+      "required": true,
+      "default_level": "bajo",
+      "rules": [],
+      "explanation": "La forma de pago debe permitir verificar el abono efectivo al propietario y conservar su comprobante.",
+      "alternative": "El pago se realizará mediante transferencia a la cuenta designada por el propietario y se acreditará con el abono efectivo.",
+      "references": [
+        {
+          "source_id": "ley-19496",
+          "label": "Información básica comercial"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto",
+      "absent_explanation": "No se identificó este término en el texto. Su ausencia debe revisarse expresamente antes de firmar."
+    },
+    {
+      "id": "price-reduction",
+      "title": "Autorización para rebajar",
+      "detect": [
+        "rebaj|reducir el precio|descuento"
+      ],
+      "required": true,
+      "default_level": "medio",
+      "rules": [
+        {
+          "level": "alto",
+          "match": "sin\\s+(?:consult|autoriz)|libremente|unilateral",
+          "unless": "\\bno\\s+(?:se\\s+)?(?:podra|puede|debera|debe).{0,45}(?:rebaj|reducir|descuento).{0,50}sin\\s+(?:consult|autoriz)",
+          "explanation": "Se detectó una referencia a decisiones sin autorización. Revisa si permite rebajas sin tu consentimiento."
+        },
+        {
+          "level": "bajo",
+          "match": "(?:requiere|requerira|necesita|con|previa).{0,40}autorizacion.{0,30}(?:escrita|por escrito)"
+        }
+      ],
+      "explanation": "Revisa que cada rebaja requiera tu autorización previa y escrita.",
+      "alternative": "Toda rebaja del precio requerirá autorización previa y escrita del propietario, con indicación del nuevo monto.",
+      "references": [
+        {
+          "source_id": "ley-19496",
+          "label": "Cláusulas que permiten modificar el contrato a solo arbitrio del proveedor"
+        },
+        {
+          "source_id": "sernac-circulares",
+          "label": "Equidad en contratos de adhesión"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto",
+      "absent_explanation": "No se identificó este término en el texto. Su ausencia debe revisarse expresamente antes de firmar."
+    },
+    {
+      "id": "transfer",
+      "title": "Condiciones del traspaso",
+      "detect": [
+        "traspas",
+        "transferencia de dominio"
+      ],
+      "required": true,
+      "default_level": "alto",
+      "rules": [
+        {
+          "level": "alto",
+          "match": "(?:antes|previo|sin).{0,35}(?:pago|abono)",
+          "unless": "\\bno\\s+(?:se\\s+)?(?:podra|puede|debera|debe).{0,45}(?:traspas|transfer).{0,45}(?:antes|sin).{0,35}pago\\s+(?:completo|integro|confirmado)"
+        },
+        {
+          "level": "bajo",
+          "match": "(?:despues|luego|una vez|condicionad[oa]).{0,70}(?:pago|abono)\\s+(?:completo|integro|confirmado)|\\bno\\s+(?:se\\s+)?(?:podra|puede|debera|debe).{0,45}(?:traspas|transfer).{0,45}(?:antes|sin).{0,35}pago\\s+(?:completo|integro|confirmado)"
+        }
+      ],
+      "explanation": "Verifica quién firma el traspaso y que se condicione a la confirmación del pago íntegro al propietario.",
+      "alternative": "El propietario autorizará y firmará el traspaso únicamente después de verificar el pago completo del precio neto.",
+      "references": [
+        {
+          "source_id": "sernac-vehiculos",
+          "label": "Compra y venta de vehículos: traspaso y pago"
+        },
+        {
+          "source_id": "ley-19496",
+          "label": "Derechos del consumidor"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto",
+      "absent_explanation": "No se identificó este término en el texto. Su ausencia debe revisarse expresamente antes de firmar."
+    },
+    {
+      "id": "penalties",
+      "title": "Penalidades y responsabilidades",
+      "detect": [
+        "penalidad|penalidades|multa|incumplimiento"
+      ],
+      "required": true,
+      "default_level": "medio",
+      "rules": [],
+      "explanation": "Revisa los supuestos de incumplimiento, los cargos y las responsabilidades de ambas partes. Según los dictámenes del SERNAC, una cláusula penal debe cumplir una función compensatoria y no ser desproporcionada.",
+      "alternative": "Las consecuencias del incumplimiento, sus montos y la responsabilidad de cada parte se acordarán expresamente por escrito.",
+      "references": [
+        {
+          "source_id": "sernac-dictamenes",
+          "label": "Cláusulas penales: función compensatoria y proporcionalidad"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto",
+      "absent_explanation": "No se identificó este término en el texto. Su ausencia debe revisarse expresamente antes de firmar."
+    },
+    {
+      "id": "unilateral-modification",
+      "title": "Modificación unilateral del contrato",
+      "detect": [
+        "modific.{0,60}(?:contrato|condiciones|terminos)",
+        "(?:contrato|condiciones|terminos).{0,60}modific"
+      ],
+      "required": false,
+      "default_level": "medio",
+      "rules": [
+        {
+          "level": "alto",
+          "match": "sin\\s+(?:previo\\s+)?aviso|unilateral|a su solo arbitrio|libremente",
+          "unless": "\\bno\\s+(?:se\\s+)?(?:podra|puede|debera|debe)",
+          "explanation": "Se detectó una cláusula que permitiría modificar el contrato sin aviso o sin tu acuerdo. El SERNAC identifica este tipo de estipulaciones como posiblemente abusivas en contratos de adhesión."
+        },
+        {
+          "level": "bajo",
+          "match": "(?:con|previa|requiere|requerira).{0,40}(?:acuerdo|autorizacion|consentimiento).{0,40}(?:escrit|por escrito)"
+        }
+      ],
+      "absent_explanation": "No se detectó una cláusula que permita modificar el contrato.",
+      "explanation": "Revisa que ninguna modificación pueda hacerse sin tu acuerdo previo y por escrito.",
+      "alternative": "Cualquier modificación de este contrato requerirá el acuerdo previo y escrito de ambas partes.",
+      "references": [
+        {
+          "source_id": "ley-19496",
+          "label": "Cláusulas abusivas en contratos de adhesión"
+        },
+        {
+          "source_id": "sernac-circulares",
+          "label": "Catálogo de cláusulas abusivas"
+        },
+        {
+          "source_id": "sernac-publicacion-84008",
+          "label": "Publicación institucional del SERNAC"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto"
+    },
+    {
+      "id": "liability-limitation",
+      "title": "Limitación de responsabilidad sobre el vehículo",
+      "detect": [
+        "no se hace responsable|no sera responsable|no responde|exime de responsabilidad|sin responsabilidad|libre de responsabilidad"
+      ],
+      "required": false,
+      "default_level": "medio",
+      "rules": [
+        {
+          "level": "alto",
+          "match": "robo|hurto|dano|siniestro|perdida|deterioro|incendio",
+          "explanation": "Se detectó una exclusión de responsabilidad por robo, daño o pérdida. Mientras el vehículo está bajo custodia de la automotora, esta limitación podría ser abusiva."
+        }
+      ],
+      "absent_explanation": "No se detectaron cláusulas que limiten la responsabilidad de la automotora.",
+      "explanation": "Revisa qué ocurre si el vehículo se daña o se pierde mientras está bajo custodia de la automotora.",
+      "alternative": "La automotora responderá por la pérdida, robo, hurto o daño del vehículo mientras permanezca bajo su custodia, [según lo acordado].",
+      "references": [
+        {
+          "source_id": "ley-19496",
+          "label": "Limitaciones absolutas de responsabilidad"
+        },
+        {
+          "source_id": "sernac-circulares",
+          "label": "Catálogo de cláusulas abusivas"
+        }
+      ],
+      "review_status": "pending_legal_review",
+      "absent_level": "alto"
+    }
+  ]
+}
