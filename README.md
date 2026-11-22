@@ -50,7 +50,7 @@ Los montos se calculan en pesos enteros, con comisión porcentual de hasta dos d
 docker compose up --build -d
 ```
 
-Levanta PostgreSQL, el backend Flask y el frontend (Nginx, puerto 5173, con proxy de `/api`). Antes, copia `.env.example` como `.env` y completa `POSTGRES_PASSWORD` y `JWT_SECRET`; el resto es opcional (`ADMIN_TOKEN`, `SMTP_*`). El Dockerfile utiliza Node 22 y Nginx, con healthcheck. Se verificaron la compilación de la imagen y las respuestas HTTP del HTML, JavaScript compilado y fallback de la SPA.
+Levanta PostgreSQL, el backend Flask y el frontend (Nginx, puerto 5173, con proxy de `/api`). No hace falta configurar nada: compose.yaml trae valores por defecto para desarrollo. Opcionalmente puedes definir ADMIN_TOKEN o SMTP_* en el entorno. El Dockerfile utiliza Node 22 y Nginx, con healthcheck. Se verificaron la compilación de la imagen y las respuestas HTTP del HTML, JavaScript compilado y fallback de la SPA.
 
 En este entorno administrado, el proxy requiere su certificado durante la instalación dentro de la imagen. El Dockerfile acepta un secreto BuildKit opcional, sin incorporarlo a las capas ni desactivar la verificación TLS:
 
