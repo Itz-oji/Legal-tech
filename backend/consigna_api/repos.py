@@ -17,7 +17,6 @@ def _id() -> str:
     return uuid.uuid4().hex
 
 
-# ---- usuarios --------------------------------------------------------------
 def crear_usuario(db: DB, email: str, nombre: str, password_hash: str) -> dict:
     uid = _id()
     db.execute("INSERT INTO users (id,email,name,password_hash,created_at) VALUES (?,?,?,?,?)",
@@ -76,7 +75,6 @@ def borrar_contrato(db: DB, user_id: str, cid: str) -> list[tuple[str, str]]:
     return files
 
 
-# ---- hitos y evidencias ----------------------------------------------------
 def _hito(r: dict) -> dict:
     return {"id": r["id"], "tipo": r["kind"], "fecha": date.fromisoformat(r["occurred_on"]),
             "monto": None if r["amount"] is None else int(r["amount"]), "nota": r["note"],
@@ -110,7 +108,24 @@ def evidencias_de(db: DB, cid: str) -> list[dict]:
     return db.query("SELECT id,filename,mime,size,sha256,created_at FROM evidences WHERE contract_id = ?", (cid,))
 
 
-# ---- reclamos --------------------------------------------------------------
+def original_de(db: DB, cid: str) -> dict | None:
+    """El contrato original es la evidencia del contrato que ningún hito referencia (sin cambiar el esquema)."""
+    return db.one(
+        "SELECT id,filename,mime,size,sha256,created_at FROM evidences WHERE contract_id = ? "
+        "AND id NOT IN (SELECT evidence_id FROM milestones WHERE contract_id = ? AND evidence_id IS NOT NULL) "
+        "ORDER BY created_at DESC", (cid, cid))
+
+
+def reemplazar_original(db: DB, cid: str) -> list[tuple[str, str]]:
+    """Elimina el original anterior (si existía). Devuelve (user_id, archivo) a borrar del disco."""
+    previo = original_de(db, cid)
+    if not previo:
+        return []
+    fila = db.one("SELECT user_id,stored_name FROM evidences WHERE id = ?", (previo["id"],))
+    db.execute("DELETE FROM evidences WHERE id = ?", (previo["id"],))
+    return [(fila["user_id"], fila["stored_name"])]
+
+
 def guardar_reclamo(db: DB, cid: str, audiencia: str, cuerpo: str, hechos: dict) -> str:
     rid = _id()
     db.execute("INSERT INTO claims (id,contract_id,audience,body,facts,created_at) VALUES (?,?,?,?,?,?)",
