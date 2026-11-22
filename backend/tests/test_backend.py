@@ -157,3 +157,73 @@ def test_admin_security_and_validation(client):
 def test_admin_disabled_without_token(tmp_path):
     c = create_app({"DATA_DIR": str(tmp_path), "ADMIN_TOKEN": "", "SYNC_INTERVAL_HOURS": 0, "ALERT_INTERVAL_MINUTES": 0}).test_client()
     assert c.post("/api/admin/sync").status_code == 503
+
+
+# ---- Contrato real de prueba (compraventa con cláusulas abusivas) ----------------------------
+CONTRATO_PRUEBA = (
+    "SEGUNDO: Precio. El precio de la compraventa es de $12.000.000. Sin embargo, el Vendedor podrá ajustar el precio en cualquier "
+    "momento, sin necesidad de aviso previo, cuando lo estime conveniente. "
+    "TERCERO: Forma de pago. El Comprador pagará la totalidad del precio en dinero efectivo y por adelantado, en el acto de la firma. "
+    "QUINTO: Entrega. La entrega deberá realizarse dentro de 30 días contados desde la firma del contrato, o dentro de 90 días si el "
+    "Vendedor así lo requiere. "
+    "SÉPTIMO: Transferencia del dominio. El dominio del vehículo se transferirá al Comprador solo una vez que este haya pagado, además "
+    "del precio, los gastos administrativos que el Vendedor determine posteriormente y que no se encuentran especificados en este contrato. "
+    "DECIMOSEXTO: El contrato se prorrogará salvo carta certificada con 180 días de anticipación."
+)
+
+
+def test_plazos_de_entrega_o_renovacion_no_son_plazo_de_pago(client):
+    f = analyze(client, CONTRATO_PRUEBA)
+    pt = f["payment-term"]
+    assert pt["omitted"] and not pt["present"], "30, 90 y 180 días no corresponden a pago: el plazo no se especifica"
+
+
+def test_transferencia_del_dominio_se_reconoce(client):
+    tr = analyze(client, CONTRATO_PRUEBA)["transfer"]
+    assert tr["present"] and not tr["omitted"] and tr["level"] == "alto"
+    assert "no están especificados" in tr["explanation"]
+    for texto in ["El dominio se transferirá al comprador una vez pagado el precio.", "La transferencia del dominio se hará tras el pago.", "El traspaso se hará después del pago completo."]:
+        assert analyze(client, texto)["transfer"]["present"], texto
+
+
+def test_plazo_de_pago_explicito_sigue_funcionando(client):
+    assert analyze(client, "El comprador pagará el saldo dentro de 60 días desde la venta.")["payment-term"]["level"] == "alto"
+    assert analyze(client, "El pago se hará en un plazo de pago de 10 días hábiles.")["payment-term"]["level"] == "medio"
+
+
+def test_ajustar_el_precio_a_discrecion_es_riesgo_alto(client):
+    pr = analyze(client, CONTRATO_PRUEBA)["price-reduction"]
+    assert pr["present"] and pr["level"] == "alto"
+
+
+def test_semilla_nueva_reemplaza_solo_copias_sin_revisar(tmp_path):
+    import json, shutil
+    from pathlib import Path
+    from consigna_api.store import CriteriaStore
+    seed = Path(__file__).resolve().parent.parent / "seed" / "criteria.json"
+    hosts = {"sernac.cl", "www.sernac.cl", "bcn.cl", "www.bcn.cl"}
+    viejo = json.loads(seed.read_text(encoding="utf-8")); viejo["seed_revision"] = 1; viejo["version"] = 1
+    (tmp_path / "criteria.json").write_text(json.dumps(viejo), encoding="utf-8")
+    store = CriteriaStore(tmp_path, seed, hosts)
+    assert store.current()["seed_revision"] == 2  # la semilla sin revisar se actualizó
+    # una versión publicada por una persona nunca se pisa
+    doc = store.current(); store.publish({"criteria": doc["criteria"], "sources": doc["sources"]}, note="revisado")
+    pub = json.loads((tmp_path / "criteria.json").read_text(encoding="utf-8"))
+    assert pub["status"] == "published"
+    store2 = CriteriaStore(tmp_path, seed, hosts)
+    assert store2.current()["status"] == "published" and store2.current()["version"] == pub["version"]
+
+
+def test_saltos_de_linea_de_un_pdf_no_cortan_las_oraciones(client):
+    ajustado = (
+        "SEXTO: Transferencia del dominio\n"
+        "El dominio del vehículo se transferirá al Comprador solo una vez que este haya pagado, además del\n"
+        "precio, los gastos administrativos que el Vendedor\n"
+        "determine posteriormente y que no se encuentran especificados en este contrato.\n"
+        "QUINTO: Entrega\n"
+        "La entrega deberá realizarse dentro de 30 días contados desde la firma del contrato, o dentro de 90 días si el\n"
+        "Vendedor así lo requiere por causas justificadas."
+    )
+    f = analyze(client, ajustado)
+    assert "no están especificados" in f["transfer"]["explanation"]
+    assert f["payment-term"]["omitted"]  # el título "Forma de pago" no se une con los días de la entrega
