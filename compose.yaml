@@ -1,6 +1,45 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: consigna
+      POSTGRES_USER: consigna
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-consigna-dev}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U consigna -d consigna"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://consigna:${POSTGRES_PASSWORD:-consigna-dev}@db:5432/consigna
+      JWT_SECRET: ${JWT_SECRET:-clave-de-desarrollo-cambiala-antes-de-publicar}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-24}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
   frontend:
     build: .
     ports:
       - "5173:80"
+    depends_on:
+      - backend
     restart: unless-stopped
+
+volumes:
+  pgdata:
+  app-data:
