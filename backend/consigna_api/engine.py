@@ -10,8 +10,30 @@ def normalize(text: str) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
 
 
-def split_clauses(normalized: str) -> list[str]:
-    return [c.strip() for c in re.split(r"[.;\n]+", normalized) if c.strip()]
+def split_clauses(text: str) -> list[str]:
+    """Divide el texto original en cláusulas (punto y punto y coma) y devuelve cada una normalizada.
+    Un salto de línea que solo parte una oración (texto copiado de un PDF) se une con la línea siguiente
+    si la anterior no termina en puntuación y la siguiente empieza en minúscula o la anterior es larga.
+    Los títulos cortos y los párrafos separados por línea en blanco siguen siendo cláusulas distintas."""
+    parrafos: list[str] = []
+    actual, largo_ultima = "", 0
+    for linea in text.split("\n"):
+        s = linea.strip()
+        if not s:
+            if actual:
+                parrafos.append(actual)
+            actual, largo_ultima = "", 0
+            continue
+        if actual and not actual.rstrip().endswith((".", ";", ":")) and (s[0].islower() or largo_ultima >= 60):
+            actual += " " + s
+        else:
+            if actual:
+                parrafos.append(actual)
+            actual = s
+        largo_ultima = len(s)
+    if actual:
+        parrafos.append(actual)
+    return [c for p in parrafos for c in (normalize(x).strip() for x in re.split(r"[.;]+", p)) if c]
 
 
 @lru_cache(maxsize=2048)
@@ -68,7 +90,7 @@ def analyze(text: str, document: dict, review_flags: dict[str, list[str]] | None
     """review_flags maps criterion id -> ids of monitored sources that changed
     since the criterion was last reviewed."""
     sources = {s["id"]: s for s in document.get("sources", [])}
-    clauses = split_clauses(normalize(text))
+    clauses = split_clauses(text)
     findings = []
     for criterion in document["criteria"]:
         if not criterion.get("enabled", True):
