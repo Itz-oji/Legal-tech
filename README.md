@@ -1,24 +1,28 @@
 # Consigna · Tu vehículo, tus términos
 
-Frontend de una plataforma chilena de apoyo al propietario durante la consignación de vehículos. Implementado con **React 19, TypeScript y Vite**, con diseño adaptable a móvil y escritorio, fuentes locales e iconos Lucide.
+Plataforma chilena de apoyo al propietario durante la consignación de vehículos. Frontend en **React 19, TypeScript y Vite** conectado a un backend **Flask** con PostgreSQL (SQLite en desarrollo). Sin pantalla de login: en modo demostración la interfaz entra sola con una cuenta compartida.
 
 ## Desarrollo
 
 Requiere Node.js 22.12+ y npm (validado con Node 24).
 
 ```sh
-cd /workspace/Legal-tech
+# 1) Backend (modo demostración, base SQLite local)
+cd backend && pip install -r requirements-dev.txt
+DATA_DIR=./var DEMO_MODE=1 flask --app wsgi run -p 8000
+
+# 2) Frontend (otra terminal, en la raíz del repositorio)
 npm ci
 npm run dev
 ```
 
-Vite escucha en el puerto 5173. No se requieren credenciales para la demostración.
+Vite escucha en el puerto 5173 y redirige `/api` al backend (127.0.0.1:8000). No se requieren credenciales: con `DEMO_MODE=1` el frontend pide un token a `POST /api/auth/demo` y usa una cuenta compartida. La primera vez, si la cuenta está vacía, carga 4 contratos de ejemplo. Si el backend no responde, la interfaz muestra un error con un botón para reintentar.
 
 ```sh
 npm test          # Pruebas de reglas, fechas y montos
 npm run build    # TypeScript y compilación de producción en dist/
 npm run preview  # Servir la compilación para revisión local
-npm run test:e2e # Cinco flujos funcionales con Playwright
+npm run test:e2e # Cinco flujos con Playwright; levantan solos el backend (DEMO_MODE, base temporal) y Vite
 ```
 
 Los tests de navegador usan Chromium del sistema si existe. En otro equipo, instala el navegador con `npx playwright install chromium`. `CHROMIUM_PATH` permite seleccionar un ejecutable.
@@ -32,11 +36,11 @@ Los tests de navegador usan Chromium del sistema si existe. En otro equipo, inst
 - **Informes y reclamos:** saldo adeudado, cronología y borrador dirigido a la automotora o SERNAC, descargable como PDF. No genera reclamos monetarios antes del vencimiento ni cuando el saldo ya está pagado. Un traspaso inseguro con saldo pendiente también habilita un borrador. No envía ni presenta el reclamo.
 - **Mis documentos:** originales y comprobantes persistidos en IndexedDB, con descarga del archivo real. Crear un contrato no inventa una entrega ni otro hito.
 
-Los metadatos se guardan en `localStorage`; los archivos en IndexedDB. Borrar los datos del navegador elimina esta información. La carga para evaluar un contrato es temporal; para conservar el original, adjuntarlo al crear un contrato. No hay sincronización entre dispositivos, cuentas ni autenticación real; el perfil de Camila es ficticio.
+Contratos, hitos y archivos se guardan en el backend (PostgreSQL y almacén de evidencias), así que persisten entre navegadores y dispositivos. La cuenta de demostración es **compartida**: cualquiera que llegue al servidor ve los mismos datos; no uses datos reales y deja `DEMO_MODE=0` fuera de una demostración. La carga para evaluar un contrato es temporal; para conservar el original, adjuntarlo al crear un contrato.
 
 ## Alcance de la demostración
 
-La evaluación usa **reglas deterministas**, no una API de IA ni un análisis jurídico validado. El umbral de 15 días hábiles es un criterio demostrativo, no un máximo legal. Los borradores no inventan citas ni fundamentos normativos y requieren revisión antes de usarse. La plataforma orienta; no reemplaza asesoría jurídica.
+La evaluación usa **reglas deterministas** (criterios versionados en el backend), no una API de IA ni un análisis jurídico validado. El umbral de 15 días hábiles es un criterio demostrativo, no un máximo legal. Los borradores no inventan citas ni fundamentos normativos y requieren revisión antes de usarse. La plataforma orienta; no reemplaza asesoría jurídica.
 
 Los montos se calculan en pesos enteros, con comisión porcentual de hasta dos decimales, sin modelo de lenguaje. Los plazos parten el día hábil posterior a la venta e incluyen un calendario nacional de referencia **2026–2027**, sin feriados regionales o extraordinarios. La validación de hitos limita las fechas al calendario compatible. Para producción el backend debe usar `holidays` de Chile como fuente autoritativa.
 
@@ -57,25 +61,20 @@ docker run --rm -p 5173:80 consigna-frontend
 
 Si Vite ya ocupa el puerto 5173, detén ese proceso antes de iniciar Docker o utiliza otro puerto local, por ejemplo `-p 5180:80`.
 
-## Estructura y siguiente integración
+## Estructura
 
 ```text
 src/App.tsx             Vistas, navegación y formularios
 src/components/ui.tsx   Modal accesible, estados, etiquetas y avisos
-src/lib/store.ts        Tipos, datos de muestra y almacenamiento de contratos
-src/lib/domain.ts       Reglas demostrativas, cálculos y calendario
-src/lib/domain.test.ts  Casos límite de fechas, montos y análisis
-src/lib/files.ts        Extracción PDF/TXT y evidencias en IndexedDB
-src/styles.css         Diseño y adaptación móvil
+src/lib/backend.ts      Cliente HTTP: sesión demo, contratos, hitos, evidencias, reclamos y PDF
+src/lib/api.ts          Evaluación de contratos (/api/analyze, con reglas locales de respaldo)
+src/lib/store.ts        Tipos y contratos de ejemplo (se cargan al backend si la cuenta está vacía)
+src/lib/domain.ts       Reglas locales de respaldo, formato y calendario de demostración
+src/lib/files.ts        Extracción de texto de PDF/TXT en el navegador
+backend/consigna_api/   API Flask (ver más abajo)
 ```
 
-La aplicación no llama a un servidor. Para conectarla al backend Python (FastAPI o Flask):
-
-1. Sustituir la persistencia local por servicios HTTP para usuarios, contratos, hitos y archivos, con autorización por propietario.
-2. Sustituir `assessContractText` por la API de análisis con criterios JSON/YAML versionados, gestión de errores y conservación de los datos cuando el proveedor de IA no esté disponible.
-3. Calcular y validar montos y plazos también en el backend; programar alertas con APScheduler y SMTP. Las notificaciones actuales solo son internas.
-4. Generar informes con fundamentos normativos revisados y entregar PDFs desde el backend. Los borradores locales sirven para probar el flujo.
-5. Configurar PostgreSQL, almacén de evidencias y servicios en el despliegue del backend. No exponer credenciales de IA o SMTP mediante variables `VITE_*`, que son públicas.
+Los plazos, montos, la secuencia segura, el informe, el borrador y el PDF los calcula el backend; el frontend solo los muestra. Las alertas por correo (APScheduler + SMTP) usan el correo de la cuenta demo (`DEMO_EMAIL`).
 
 ## Backend de criterios (`backend/`)
 
@@ -83,7 +82,7 @@ Flask. Contrasta el texto del contrato (pegado, TXT o PDF con texto) con **crite
 
 ```sh
 cd backend && pip install -r requirements-dev.txt
-python -m pytest                       # 10 pruebas
+python -m pytest                       # pruebas del backend
 DATA_DIR=./var ADMIN_TOKEN=... flask --app wsgi run -p 8000
 npm run dev                            # Vite redirige /api a 127.0.0.1:8000
 ```
@@ -117,4 +116,4 @@ Todos los endpoints (salvo registro, login, `/api/analyze` y `/api/criteria`) re
 
 - **Plazos y montos** (`plazos.py`, `calendario.py`): se calculan en código con la biblioteca `holidays` de Chile; sin ella usan un calendario de referencia 2026–2027. Los montos son pesos enteros y la comisión admite dos decimales.
 - **Alertas** (`alertas.py`): aviso 3 días antes, el día del vencimiento, al vencer y ante un traspaso sin pago completo; cada alerta se envía una sola vez. Sin `SMTP_HOST` no se envía nada y se reintenta cuando se configura.
-- **Pendiente**: la interfaz aún guarda los contratos en `localStorage`; falta migrarla a estos endpoints. La conexión a PostgreSQL no se probó con un servidor real (las pruebas usan SQLite con el mismo SQL).
+- `POST /api/auth/demo` (solo con `DEMO_MODE=1`) devuelve un token de la cuenta compartida; `PUT /api/contracts/<id>/original` adjunta el contrato original; `GET /api/contracts?completo=1` lista los contratos con hitos, comprobantes y estado calculado.
