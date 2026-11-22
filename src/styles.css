@@ -284,18 +284,18 @@ button:active:not(:disabled) {
   justify-content: space-between;
   border-bottom: 1px solid #e6e9e2;
   padding: 0 39px;
-  background: #fff;
+  background: #194335;
 }
 .breadcrumb {
   display: flex;
   align-items: center;
   gap: 13px;
   font-size: 11px;
-  color: #8d958d;
+  color: #ffffff;
 }
 .breadcrumb strong {
   font-weight: 500;
-  color: #47544b;
+  color: #ffffff;
 }
 .breadcrumb svg {
   color: #afb6aa;
