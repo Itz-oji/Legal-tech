@@ -114,6 +114,21 @@ class CriteriaStore:
         self._mtime: int | None = None
         if not self.path.exists():
             shutil.copyfile(seed_path, self.path)
+        else:
+            self._actualizar_semilla(Path(seed_path))
+
+    def _actualizar_semilla(self, seed_path: Path) -> None:
+        """Si la copia de trabajo sigue siendo la semilla (nadie publicó una versión revisada) y la
+        semilla del código es más nueva, la reemplaza. Una versión publicada por una persona nunca se toca."""
+        try:
+            actual = json.loads(self.path.read_text(encoding="utf-8"))
+            semilla = json.loads(seed_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            return
+        rev_actual, rev_semilla = actual.get("seed_revision", 1), semilla.get("seed_revision", 1)
+        if actual.get("status") == "seed" and rev_actual < rev_semilla:
+            shutil.copyfile(self.path, self.history_dir / f"criteria-seed-r{rev_actual}.json")
+            shutil.copyfile(seed_path, self.path)
 
     def current(self) -> dict:
         with self._lock:
