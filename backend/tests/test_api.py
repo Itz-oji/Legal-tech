@@ -204,3 +204,43 @@ def test_analizar_contrato_guardado(ctx):
     cid = nuevo_contrato(c, h)
     r = c.post(f"/api/contracts/{cid}/analyze", headers=h).get_json()
     assert {f["id"]: f for f in r["findings"]}["payment-term"]["level"] == "alto"
+
+
+def test_modo_demo(tmp_path):
+    def app_con(demo):
+        return create_app({"DATA_DIR": str(tmp_path / str(demo)), "SYNC_INTERVAL_HOURS": 0, "ALERT_INTERVAL_MINUTES": 0,
+                           "JWT_SECRET": "x" * 40, "TODAY": lambda: date(2026, 11, 30), "DEMO_MODE": demo})
+    assert app_con(False).test_client().post("/api/auth/demo").status_code == 404
+    c = app_con(True).test_client()
+    a, b = c.post("/api/auth/demo"), c.post("/api/auth/demo")
+    assert a.status_code == b.status_code == 200
+    assert a.get_json()["usuario"]["id"] == b.get_json()["usuario"]["id"]  # misma cuenta compartida
+    h = {"Authorization": "Bearer " + a.get_json()["token"]}
+    assert c.get("/api/me", headers=h).status_code == 200
+
+
+def test_listado_completo_y_contrato_original(ctx):
+    app, c, *_ = ctx
+    h = registrar(c)
+    cid = nuevo_contrato(c, h)
+    venta_y_entrega(c, h, cid)
+    r = c.post(f"/api/contracts/{cid}/milestones", headers=h, data={
+        "tipo": "pago", "fecha": "2026-11-10", "monto": "1000000", "archivo": (io.BytesIO(b"%PDF-1.4 pago"), "pago.pdf")},
+        content_type="multipart/form-data")
+    assert r.status_code == 201, r.get_data(as_text=True)
+    assert c.get("/api/contracts", headers=h).get_json()["contratos"][0].get("hitos") is None  # sin ?completo=1
+    assert c.put(f"/api/contracts/{cid}/original", headers=h).status_code == 422
+    for nombre in ("v1.txt", "v2.txt"):  # reemplazar deja un solo original
+        r = c.put(f"/api/contracts/{cid}/original", headers=h, data={"archivo": (io.BytesIO(b"Contrato de prueba " + nombre.encode()), nombre)},
+                  content_type="multipart/form-data")
+        assert r.status_code == 201, r.get_data(as_text=True)
+    lista = c.get("/api/contracts?completo=1", headers=h).get_json()["contratos"]
+    assert len(lista) == 1
+    k = lista[0]
+    assert [x["tipo"] for x in k["hitos"]] == ["entrega", "venta", "pago"]
+    assert k["original"]["filename"] == "v2.txt"            # el comprobante del pago no se confunde con el original
+    assert len(k["evidencias"]) == 2
+    assert k["estado"]["saldo"] == 7_550_000                  # 9.000.000 - 5 % - 1.000.000
+    d = c.get(f"/api/contracts/{cid}", headers=h).get_json()
+    assert d["original"]["filename"] == "v2.txt" and len(d["evidencias"]) == 2
+    assert c.get(f"/api/evidences/{k['original']['id']}", headers=h).status_code == 200
