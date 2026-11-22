@@ -23,6 +23,8 @@ services:
       DATABASE_URL: postgresql://consigna:${POSTGRES_PASSWORD:-consigna-dev}@db:5432/consigna
       JWT_SECRET: ${JWT_SECRET:-clave-de-desarrollo-cambiala-antes-de-publicar}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      DEMO_MODE: ${DEMO_MODE:-1}
+      DEMO_EMAIL: ${DEMO_EMAIL:-demo@consigna.local}
       SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-24}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
