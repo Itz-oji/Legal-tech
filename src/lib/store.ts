@@ -1,3 +1,4 @@
+import type { ServerState } from "./backend";
 export type MilestoneType = "entrega" | "venta" | "pago" | "traspaso";
 export interface Evidence {
   id: string;
@@ -25,6 +26,8 @@ export interface Contract {
   text: string;
   original?: Evidence;
   milestones: Milestone[];
+  /** Estado calculado por el backend (existe una vez registrada la venta). */
+  server?: ServerState;
 }
 export const todayISO = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -121,28 +124,4 @@ export function seedContracts(): Contract[] {
       ],
     },
   ];
-}
-export function loadContracts(): Contract[] {
-  try {
-    const saved = localStorage.getItem("consigna.contracts.v1");
-    if (saved) {
-      const value = JSON.parse(saved);
-      if (
-        Array.isArray(value) &&
-        value.every((c) => c.id && c.vehicle && Array.isArray(c.milestones))
-      )
-        return value;
-    }
-  } catch {
-    /* A fresh demo remains usable if storage is unavailable. */
-  }
-  return seedContracts();
-}
-export function saveContracts(contracts: Contract[]): boolean {
-  try {
-    localStorage.setItem("consigna.contracts.v1", JSON.stringify(contracts));
-    return true;
-  } catch {
-    return false;
-  }
 }

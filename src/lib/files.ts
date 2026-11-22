@@ -1,8 +1,6 @@
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const DATABASE_NAME = "consigna-evidence";
-const STORE_NAME = "files";
 
 function validateFile(file: File): void {
   if (!file.size)
@@ -67,100 +65,4 @@ export async function readContractFile(file: File): Promise<string> {
   } finally {
     await loadingTask?.destroy();
   }
-}
-
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (!globalThis.indexedDB) {
-      reject(
-        new Error(
-          "Tu navegador no permite guardar evidencias. Utiliza un navegador compatible.",
-        ),
-      );
-      return;
-    }
-    const request = indexedDB.open(DATABASE_NAME, 1);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-        request.result.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
-      reject(
-        new Error(
-          "No se pudo abrir el almacenamiento de evidencias. Revisa los permisos de tu navegador.",
-        ),
-      );
-    request.onblocked = () =>
-      reject(
-        new Error(
-          "El almacenamiento está ocupado. Cierra otras pestañas de la aplicación e inténtalo nuevamente.",
-        ),
-      );
-  });
-}
-
-/** Save the original file in this browser's IndexedDB, not just its filename. */
-export async function storeEvidenceFile(file: File): Promise<string> {
-  validateFile(file);
-  const database = await openDatabase();
-  const id = crypto.randomUUID();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(STORE_NAME, "readwrite");
-      transaction.objectStore(STORE_NAME).put(file, id);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () =>
-        reject(
-          new Error(
-            "No se pudo guardar el archivo. Comprueba que haya espacio disponible en el navegador.",
-          ),
-        );
-      transaction.onabort = () =>
-        reject(
-          new Error(
-            "No se pudo completar el guardado del archivo. Inténtalo nuevamente.",
-          ),
-        );
-    });
-    return id;
-  } finally {
-    database.close();
-  }
-}
-
-export async function getEvidenceFile(id: string): Promise<File | undefined> {
-  const database = await openDatabase();
-  try {
-    return await new Promise<File | undefined>((resolve, reject) => {
-      const transaction = database.transaction(STORE_NAME, "readonly");
-      const request = transaction.objectStore(STORE_NAME).get(id);
-      request.onsuccess = () => resolve(request.result as File | undefined);
-      request.onerror = () =>
-        reject(new Error("No se pudo recuperar la evidencia guardada."));
-    });
-  } finally {
-    database.close();
-  }
-}
-
-export async function downloadEvidence(
-  id: string,
-  name: string,
-): Promise<void> {
-  const file = await getEvidenceFile(id);
-  if (!file) {
-    throw new Error(
-      "Este archivo no está disponible en este navegador. Vuelve a cargar la evidencia original.",
-    );
-  }
-  const url = URL.createObjectURL(file);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name || file.name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

@@ -14,6 +14,9 @@ export type RiskAssessment = {
   explanation: string;
   alternative: string;
   omitted: boolean;
+  source_changed?: boolean;
+  criterion_status?: string;
+  references?: Array<{ label: string; title: string; url?: string | null }>;
 };
 
 const clp = new Intl.NumberFormat("es-CL", {
