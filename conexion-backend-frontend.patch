@@ -1,0 +1,1500 @@
+diff --git a/.env.example b/.env.example
+index e67085f..64146af 100644
+--- a/.env.example
++++ b/.env.example
+@@ -11,3 +11,8 @@ SMTP_PORT=587
+ SMTP_USER=
+ SMTP_PASSWORD=
+ SMTP_FROM=
++# Modo demostración: la interfaz entra sola con una cuenta compartida (no hay pantalla de login).
++# Úsalo solo con datos de prueba. Pon DEMO_MODE=0 para deshabilitarlo.
++DEMO_MODE=1
++# Correo de la cuenta demo: a esta dirección llegan las alertas si configuras SMTP_*
++DEMO_EMAIL=demo@consigna.local
+diff --git a/README.md b/README.md
+index 665bcc9..25ac3e3 100644
+--- a/README.md
++++ b/README.md
+@@ -1,24 +1,28 @@
+ # Consigna · Tu vehículo, tus términos
+ 
+-Frontend de una plataforma chilena de apoyo al propietario durante la consignación de vehículos. Implementado con **React 19, TypeScript y Vite**, con diseño adaptable a móvil y escritorio, fuentes locales e iconos Lucide.
++Plataforma chilena de apoyo al propietario durante la consignación de vehículos. Frontend en **React 19, TypeScript y Vite** conectado a un backend **Flask** con PostgreSQL (SQLite en desarrollo). Sin pantalla de login: en modo demostración la interfaz entra sola con una cuenta compartida.
+ 
+ ## Desarrollo
+ 
+ Requiere Node.js 22.12+ y npm (validado con Node 24).
+ 
+ ```sh
+-cd /workspace/Legal-tech
++# 1) Backend (modo demostración, base SQLite local)
++cd backend && pip install -r requirements-dev.txt
++DATA_DIR=./var DEMO_MODE=1 flask --app wsgi run -p 8000
++
++# 2) Frontend (otra terminal, en la raíz del repositorio)
+ npm ci
+ npm run dev
+ ```
+ 
+-Vite escucha en el puerto 5173. No se requieren credenciales para la demostración.
++Vite escucha en el puerto 5173 y redirige `/api` al backend (127.0.0.1:8000). No se requieren credenciales: con `DEMO_MODE=1` el frontend pide un token a `POST /api/auth/demo` y usa una cuenta compartida. La primera vez, si la cuenta está vacía, carga 4 contratos de ejemplo. Si el backend no responde, la interfaz muestra un error con un botón para reintentar.
+ 
+ ```sh
+ npm test          # Pruebas de reglas, fechas y montos
+ npm run build    # TypeScript y compilación de producción en dist/
+ npm run preview  # Servir la compilación para revisión local
+-npm run test:e2e # Cinco flujos funcionales con Playwright
++npm run test:e2e # Cinco flujos con Playwright; levantan solos el backend (DEMO_MODE, base temporal) y Vite
+ ```
+ 
+ Los tests de navegador usan Chromium del sistema si existe. En otro equipo, instala el navegador con `npx playwright install chromium`. `CHROMIUM_PATH` permite seleccionar un ejecutable.
+@@ -32,11 +36,11 @@ Los tests de navegador usan Chromium del sistema si existe. En otro equipo, inst
+ - **Informes y reclamos:** saldo adeudado, cronología y borrador dirigido a la automotora o SERNAC, descargable como PDF. No genera reclamos monetarios antes del vencimiento ni cuando el saldo ya está pagado. Un traspaso inseguro con saldo pendiente también habilita un borrador. No envía ni presenta el reclamo.
+ - **Mis documentos:** originales y comprobantes persistidos en IndexedDB, con descarga del archivo real. Crear un contrato no inventa una entrega ni otro hito.
+ 
+-Los metadatos se guardan en `localStorage`; los archivos en IndexedDB. Borrar los datos del navegador elimina esta información. La carga para evaluar un contrato es temporal; para conservar el original, adjuntarlo al crear un contrato. No hay sincronización entre dispositivos, cuentas ni autenticación real; el perfil de Camila es ficticio.
++Contratos, hitos y archivos se guardan en el backend (PostgreSQL y almacén de evidencias), así que persisten entre navegadores y dispositivos. La cuenta de demostración es **compartida**: cualquiera que llegue al servidor ve los mismos datos; no uses datos reales y deja `DEMO_MODE=0` fuera de una demostración. La carga para evaluar un contrato es temporal; para conservar el original, adjuntarlo al crear un contrato.
+ 
+ ## Alcance de la demostración
+ 
+-La evaluación usa **reglas deterministas**, no una API de IA ni un análisis jurídico validado. El umbral de 15 días hábiles es un criterio demostrativo, no un máximo legal. Los borradores no inventan citas ni fundamentos normativos y requieren revisión antes de usarse. La plataforma orienta; no reemplaza asesoría jurídica.
++La evaluación usa **reglas deterministas** (criterios versionados en el backend), no una API de IA ni un análisis jurídico validado. El umbral de 15 días hábiles es un criterio demostrativo, no un máximo legal. Los borradores no inventan citas ni fundamentos normativos y requieren revisión antes de usarse. La plataforma orienta; no reemplaza asesoría jurídica.
+ 
+ Los montos se calculan en pesos enteros, con comisión porcentual de hasta dos decimales, sin modelo de lenguaje. Los plazos parten el día hábil posterior a la venta e incluyen un calendario nacional de referencia **2026–2027**, sin feriados regionales o extraordinarios. La validación de hitos limita las fechas al calendario compatible. Para producción el backend debe usar `holidays` de Chile como fuente autoritativa.
+ 
+@@ -57,25 +61,20 @@ docker run --rm -p 5173:80 consigna-frontend
+ 
+ Si Vite ya ocupa el puerto 5173, detén ese proceso antes de iniciar Docker o utiliza otro puerto local, por ejemplo `-p 5180:80`.
+ 
+-## Estructura y siguiente integración
++## Estructura
+ 
+ ```text
+ src/App.tsx             Vistas, navegación y formularios
+ src/components/ui.tsx   Modal accesible, estados, etiquetas y avisos
+-src/lib/store.ts        Tipos, datos de muestra y almacenamiento de contratos
+-src/lib/domain.ts       Reglas demostrativas, cálculos y calendario
+-src/lib/domain.test.ts  Casos límite de fechas, montos y análisis
+-src/lib/files.ts        Extracción PDF/TXT y evidencias en IndexedDB
+-src/styles.css         Diseño y adaptación móvil
++src/lib/backend.ts      Cliente HTTP: sesión demo, contratos, hitos, evidencias, reclamos y PDF
++src/lib/api.ts          Evaluación de contratos (/api/analyze, con reglas locales de respaldo)
++src/lib/store.ts        Tipos y contratos de ejemplo (se cargan al backend si la cuenta está vacía)
++src/lib/domain.ts       Reglas locales de respaldo, formato y calendario de demostración
++src/lib/files.ts        Extracción de texto de PDF/TXT en el navegador
++backend/consigna_api/   API Flask (ver más abajo)
+ ```
+ 
+-La aplicación no llama a un servidor. Para conectarla al backend Python (FastAPI o Flask):
+-
+-1. Sustituir la persistencia local por servicios HTTP para usuarios, contratos, hitos y archivos, con autorización por propietario.
+-2. Sustituir `assessContractText` por la API de análisis con criterios JSON/YAML versionados, gestión de errores y conservación de los datos cuando el proveedor de IA no esté disponible.
+-3. Calcular y validar montos y plazos también en el backend; programar alertas con APScheduler y SMTP. Las notificaciones actuales solo son internas.
+-4. Generar informes con fundamentos normativos revisados y entregar PDFs desde el backend. Los borradores locales sirven para probar el flujo.
+-5. Configurar PostgreSQL, almacén de evidencias y servicios en el despliegue del backend. No exponer credenciales de IA o SMTP mediante variables `VITE_*`, que son públicas.
++Los plazos, montos, la secuencia segura, el informe, el borrador y el PDF los calcula el backend; el frontend solo los muestra. Las alertas por correo (APScheduler + SMTP) usan el correo de la cuenta demo (`DEMO_EMAIL`).
+ 
+ ## Backend de criterios (`backend/`)
+ 
+@@ -83,7 +82,7 @@ Flask. Contrasta el texto del contrato (pegado, TXT o PDF con texto) con **crite
+ 
+ ```sh
+ cd backend && pip install -r requirements-dev.txt
+-python -m pytest                       # 10 pruebas
++python -m pytest                       # pruebas del backend
+ DATA_DIR=./var ADMIN_TOKEN=... flask --app wsgi run -p 8000
+ npm run dev                            # Vite redirige /api a 127.0.0.1:8000
+ ```
+@@ -117,4 +116,4 @@ Todos los endpoints (salvo registro, login, `/api/analyze` y `/api/criteria`) re
+ 
+ - **Plazos y montos** (`plazos.py`, `calendario.py`): se calculan en código con la biblioteca `holidays` de Chile; sin ella usan un calendario de referencia 2026–2027. Los montos son pesos enteros y la comisión admite dos decimales.
+ - **Alertas** (`alertas.py`): aviso 3 días antes, el día del vencimiento, al vencer y ante un traspaso sin pago completo; cada alerta se envía una sola vez. Sin `SMTP_HOST` no se envía nada y se reintenta cuando se configura.
+-- **Pendiente**: la interfaz aún guarda los contratos en `localStorage`; falta migrarla a estos endpoints. La conexión a PostgreSQL no se probó con un servidor real (las pruebas usan SQLite con el mismo SQL).
++- `POST /api/auth/demo` (solo con `DEMO_MODE=1`) devuelve un token de la cuenta compartida; `PUT /api/contracts/<id>/original` adjunta el contrato original; `GET /api/contracts?completo=1` lista los contratos con hitos, comprobantes y estado calculado.
+diff --git a/backend/consigna_api/app.py b/backend/consigna_api/app.py
+index 229bc28..a379015 100644
+--- a/backend/consigna_api/app.py
++++ b/backend/consigna_api/app.py
+@@ -67,10 +67,14 @@ def create_app(config: dict | None = None) -> Flask:
+         "SMTP_PASSWORD": os.environ.get("SMTP_PASSWORD", ""),
+         "SMTP_FROM": os.environ.get("SMTP_FROM", ""),
+         "ALERT_INTERVAL_MINUTES": float(os.environ.get("ALERT_INTERVAL_MINUTES", "60")),
++        # Modo demostración: la interfaz entra sola con una cuenta compartida, sin pantalla de login.
++        "DEMO_MODE": os.environ.get("DEMO_MODE", "0").lower() in ("1", "true", "si", "sí", "on"),
++        "DEMO_EMAIL": os.environ.get("DEMO_EMAIL", "demo@consigna.local"),
+         "TODAY": None, "SENDER": None,
+     }
+     cfg.update(config or {})
+     app = Flask(__name__)
++    app.config["DEMO_MODE"], app.config["DEMO_EMAIL"] = bool(cfg["DEMO_MODE"]), cfg["DEMO_EMAIL"]
+     app.json.default = _json_default
+     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD + 1024 * 1024
+     hosts = {h.strip() for h in cfg["ALLOWED_HOSTS"].split(",") if h.strip()}
+diff --git a/backend/consigna_api/repos.py b/backend/consigna_api/repos.py
+index 44a44fd..6121754 100644
+--- a/backend/consigna_api/repos.py
++++ b/backend/consigna_api/repos.py
+@@ -110,6 +110,24 @@ def evidencias_de(db: DB, cid: str) -> list[dict]:
+     return db.query("SELECT id,filename,mime,size,sha256,created_at FROM evidences WHERE contract_id = ?", (cid,))
+ 
+ 
++def original_de(db: DB, cid: str) -> dict | None:
++    """El contrato original es la evidencia del contrato que ningún hito referencia (sin cambiar el esquema)."""
++    return db.one(
++        "SELECT id,filename,mime,size,sha256,created_at FROM evidences WHERE contract_id = ? "
++        "AND id NOT IN (SELECT evidence_id FROM milestones WHERE contract_id = ? AND evidence_id IS NOT NULL) "
++        "ORDER BY created_at DESC", (cid, cid))
++
++
++def reemplazar_original(db: DB, cid: str) -> list[tuple[str, str]]:
++    """Elimina el original anterior (si existía). Devuelve (user_id, archivo) a borrar del disco."""
++    previo = original_de(db, cid)
++    if not previo:
++        return []
++    fila = db.one("SELECT user_id,stored_name FROM evidences WHERE id = ?", (previo["id"],))
++    db.execute("DELETE FROM evidences WHERE id = ?", (previo["id"],))
++    return [(fila["user_id"], fila["stored_name"])]
++
++
+ # ---- reclamos --------------------------------------------------------------
+ def guardar_reclamo(db: DB, cid: str, audiencia: str, cuerpo: str, hechos: dict) -> str:
+     rid = _id()
+diff --git a/backend/consigna_api/rutas.py b/backend/consigna_api/rutas.py
+index f8a1bfa..05d4580 100644
+--- a/backend/consigna_api/rutas.py
++++ b/backend/consigna_api/rutas.py
+@@ -2,6 +2,7 @@
+ from __future__ import annotations
+ 
+ import json
++import secrets
+ import sqlite3
+ from datetime import date
+ 
+@@ -90,6 +91,25 @@ def login():
+     return jsonify(token=auth.emitir_token(u["id"]), usuario={"id": u["id"], "email": u["email"], "nombre": u["name"]})
+ 
+ 
++@bp.post("/api/auth/demo")
++def demo():
++    """Modo demostración (DEMO_MODE=1): entrega un token de una cuenta compartida, sin pantalla de login.
++    Cualquiera que llegue al servidor entra a esa cuenta: no usar con datos reales."""
++    if not current_app.config.get("DEMO_MODE"):
++        return error("El modo demostración está deshabilitado.", 404)
++    email = current_app.config["DEMO_EMAIL"].strip().lower()
++    u = repos.usuario_por_email(S().db, email)
++    if not u:
++        try:
++            nuevo = repos.crear_usuario(S().db, email, "Cuenta de demostración", auth.hash_password(secrets.token_urlsafe(24)))
++            u = {"id": nuevo["id"], "email": email, "name": nuevo["nombre"]}
++        except Exception:  # dos primeras visitas simultáneas: la otra ya la creó
++            u = repos.usuario_por_email(S().db, email)
++            if not u:
++                raise
++    return jsonify(token=auth.emitir_token(u["id"]), usuario={"id": u["id"], "email": u["email"], "nombre": u["name"]})
++
++
+ @bp.get("/api/me")
+ @auth.login_required
+ def me():
+@@ -107,6 +127,13 @@ def _salida(c: dict) -> dict:
+     return {k: v for k, v in c.items() if k != "user_id"}
+ 
+ 
++def _completo(c: dict) -> dict:
++    """Contrato con sus hitos, comprobantes, contrato original y estado calculado (plazos y montos en código)."""
++    hitos = repos.hitos_de(S().db, c["id"])
++    return {**_salida(c), "hitos": hitos, "evidencias": repos.evidencias_de(S().db, c["id"]),
++            "original": repos.original_de(S().db, c["id"]), "estado": informes.estado_de(c, hitos, S().hoy())}
++
++
+ @bp.post("/api/contracts")
+ @auth.login_required
+ def crear_contrato():
+@@ -127,6 +154,8 @@ def crear_contrato():
+ @bp.get("/api/contracts")
+ @auth.login_required
+ def listar():
++    if verdadero(request.args.get("completo")):
++        return jsonify(contratos=[_completo(c) for c in repos.listar_contratos(S().db, g.user_id)])
+     return jsonify(contratos=[_salida(c) for c in repos.listar_contratos(S().db, g.user_id)])
+ 
+ 
+@@ -136,9 +165,9 @@ def detalle(cid):
+     c, err = _contrato_o_404(cid)
+     if err:
+         return err
+-    hitos = repos.hitos_de(S().db, cid)
+-    est = informes.estado_de(c, hitos, S().hoy())
+-    return jsonify(contrato=_salida(c), hitos=hitos, estado=est)
++    completo = _completo(c)
++    return jsonify(contrato=_salida(c), hitos=completo["hitos"], estado=completo["estado"],
++                   evidencias=completo["evidencias"], original=completo["original"])
+ 
+ 
+ @bp.delete("/api/contracts/<cid>")
+@@ -152,6 +181,31 @@ def borrar(cid):
+     return "", 204
+ 
+ 
++@bp.put("/api/contracts/<cid>/original")
++@auth.login_required
++def subir_original(cid):
++    """Adjunta (o reemplaza) el archivo del contrato original, que no corresponde a ningún hito."""
++    c, err = _contrato_o_404(cid)
++    if err:
++        return err
++    archivo = request.files.get("archivo")
++    if not archivo:
++        return error("Adjunta el contrato en el campo 'archivo'.", 422)
++    try:
++        meta = S().almacen.guardar(g.user_id, archivo.filename or "", archivo.read())
++    except EvidenciaInvalida as e:
++        return error(str(e), 422)
++    try:
++        previos = repos.reemplazar_original(S().db, cid)
++        ev = repos.crear_evidencia(S().db, g.user_id, cid, meta)
++    except Exception:
++        S().almacen.borrar(g.user_id, meta["stored_name"])
++        raise
++    for uid, nombre in previos:
++        S().almacen.borrar(uid, nombre)
++    return jsonify(original=ev), 201
++
++
+ @bp.post("/api/contracts/<cid>/analyze")
+ @auth.login_required
+ def analizar_guardado(cid):
+diff --git a/backend/tests/test_api.py b/backend/tests/test_api.py
+index 1e4df6a..b9127d8 100644
+--- a/backend/tests/test_api.py
++++ b/backend/tests/test_api.py
+@@ -204,3 +204,43 @@ def test_analizar_contrato_guardado(ctx):
+     cid = nuevo_contrato(c, h)
+     r = c.post(f"/api/contracts/{cid}/analyze", headers=h).get_json()
+     assert {f["id"]: f for f in r["findings"]}["payment-term"]["level"] == "alto"
++
++
++def test_modo_demo(tmp_path):
++    def app_con(demo):
++        return create_app({"DATA_DIR": str(tmp_path / str(demo)), "SYNC_INTERVAL_HOURS": 0, "ALERT_INTERVAL_MINUTES": 0,
++                           "JWT_SECRET": "x" * 40, "TODAY": lambda: date(2026, 11, 30), "DEMO_MODE": demo})
++    assert app_con(False).test_client().post("/api/auth/demo").status_code == 404
++    c = app_con(True).test_client()
++    a, b = c.post("/api/auth/demo"), c.post("/api/auth/demo")
++    assert a.status_code == b.status_code == 200
++    assert a.get_json()["usuario"]["id"] == b.get_json()["usuario"]["id"]  # misma cuenta compartida
++    h = {"Authorization": "Bearer " + a.get_json()["token"]}
++    assert c.get("/api/me", headers=h).status_code == 200
++
++
++def test_listado_completo_y_contrato_original(ctx):
++    app, c, *_ = ctx
++    h = registrar(c)
++    cid = nuevo_contrato(c, h)
++    venta_y_entrega(c, h, cid)
++    r = c.post(f"/api/contracts/{cid}/milestones", headers=h, data={
++        "tipo": "pago", "fecha": "2026-11-10", "monto": "1000000", "archivo": (io.BytesIO(b"%PDF-1.4 pago"), "pago.pdf")},
++        content_type="multipart/form-data")
++    assert r.status_code == 201, r.get_data(as_text=True)
++    assert c.get("/api/contracts", headers=h).get_json()["contratos"][0].get("hitos") is None  # sin ?completo=1
++    assert c.put(f"/api/contracts/{cid}/original", headers=h).status_code == 422
++    for nombre in ("v1.txt", "v2.txt"):  # reemplazar deja un solo original
++        r = c.put(f"/api/contracts/{cid}/original", headers=h, data={"archivo": (io.BytesIO(b"Contrato de prueba " + nombre.encode()), nombre)},
++                  content_type="multipart/form-data")
++        assert r.status_code == 201, r.get_data(as_text=True)
++    lista = c.get("/api/contracts?completo=1", headers=h).get_json()["contratos"]
++    assert len(lista) == 1
++    k = lista[0]
++    assert [x["tipo"] for x in k["hitos"]] == ["entrega", "venta", "pago"]
++    assert k["original"]["filename"] == "v2.txt"            # el comprobante del pago no se confunde con el original
++    assert len(k["evidencias"]) == 2
++    assert k["estado"]["saldo"] == 7_550_000                  # 9.000.000 - 5 % - 1.000.000
++    d = c.get(f"/api/contracts/{cid}", headers=h).get_json()
++    assert d["original"]["filename"] == "v2.txt" and len(d["evidencias"]) == 2
++    assert c.get(f"/api/evidences/{k['original']['id']}", headers=h).status_code == 200
+diff --git a/compose.yaml b/compose.yaml
+index 2c183b7..4cce1cb 100644
+--- a/compose.yaml
++++ b/compose.yaml
+@@ -23,6 +23,8 @@ services:
+       DATABASE_URL: postgresql://consigna:${POSTGRES_PASSWORD:-consigna-dev}@db:5432/consigna
+       JWT_SECRET: ${JWT_SECRET:-clave-de-desarrollo-cambiala-antes-de-publicar}
+       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
++      DEMO_MODE: ${DEMO_MODE:-1}
++      DEMO_EMAIL: ${DEMO_EMAIL:-demo@consigna.local}
+       SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-24}
+       SMTP_HOST: ${SMTP_HOST:-}
+       SMTP_PORT: ${SMTP_PORT:-587}
+diff --git a/playwright.config.ts b/playwright.config.ts
+index 99ce0c6..ba4f10d 100644
+--- a/playwright.config.ts
++++ b/playwright.config.ts
+@@ -1,4 +1,6 @@
+ import { existsSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
+ import { defineConfig } from "@playwright/test";
+ 
+ const baseURL = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
+@@ -8,8 +10,9 @@ const executablePath =
+ 
+ export default defineConfig({
+   testDir: "./tests",
+-  fullyParallel: true,
+-  workers: 2,
++  // Las pruebas comparten la cuenta demo del backend: se ejecutan de a una.
++  fullyParallel: false,
++  workers: 1,
+   timeout: 45_000,
+   expect: { timeout: 10_000 },
+   reporter: "list",
+@@ -22,10 +25,27 @@ export default defineConfig({
+     trace: "retain-on-failure",
+     launchOptions: { executablePath, args: ["--no-sandbox"] },
+   },
+-  webServer: {
+-    command: "npm run dev -- --port 5173 --strictPort",
+-    url: baseURL,
+-    reuseExistingServer: true,
+-    timeout: 120_000,
+-  },
++  webServer: [
++    {
++      // Backend Flask en modo demostración y con una base SQLite temporal.
++      command: "python -m flask --app wsgi run -p 8000",
++      cwd: "backend",
++      url: "http://127.0.0.1:8000/api/health",
++      reuseExistingServer: true,
++      timeout: 60_000,
++      env: {
++        DEMO_MODE: "1",
++        JWT_SECRET: "clave-solo-para-pruebas-e2e-0123456789",
++        DATA_DIR: join(tmpdir(), "consigna-e2e"),
++        SYNC_INTERVAL_HOURS: "0",
++        ALERT_INTERVAL_MINUTES: "0",
++      },
++    },
++    {
++      command: "npm run dev -- --port 5173 --strictPort",
++      url: baseURL,
++      reuseExistingServer: true,
++      timeout: 120_000,
++    },
++  ],
+ });
+diff --git a/src/App.tsx b/src/App.tsx
+index 6358227..56f17fb 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -51,13 +51,18 @@ import {
+ } from "./lib/domain";
+ import type { RiskAssessment } from "./lib/domain";
+ import { analyzeContract, type AnalysisResult } from "./lib/api";
+-import { loadContracts, saveContracts, todayISO } from "./lib/store";
+-import type { Contract, Milestone, MilestoneType } from "./lib/store";
++import { todayISO } from "./lib/store";
++import type { Contract, MilestoneType } from "./lib/store";
++import { readContractFile } from "./lib/files";
+ import {
++  addMilestone as saveMilestone,
++  createClaim,
++  createContract,
+   downloadEvidence,
+-  readContractFile,
+-  storeEvidenceFile,
+-} from "./lib/files";
++  downloadReportPdf,
++  loadWorkspace,
++  type Audience,
++} from "./lib/backend";
+ 
+ type Page =
+   "dashboard" | "contracts" | "evaluation" | "tracking" | "claims" | "evidence";
+@@ -80,15 +85,23 @@ const milestoneNames: Record<MilestoneType, string> = {
+   traspaso: "Traspaso del vehículo",
+ };
+ function financial(c: Contract) {
++  const s = c.server;
++  if (s)
++    return {
++      commission: s.comision,
++      netAmount: s.neto,
++      totalPaid: s.total_pagado,
++      balance: s.saldo,
++    };
+   return calculateBalance(
+     c.price,
+     c.commission,
+     c.milestones.filter((m) => m.type === "pago").map((m) => m.amount || 0),
+   );
+ }
++/** Vencimiento calculado por el backend (holidays de Chile); null si aún no hay venta. */
+ function deadline(c: Contract) {
+-  const sale = c.milestones.find((m) => m.type === "venta");
+-  return sale ? addBusinessDays(sale.date, c.paymentDays) : null;
++  return c.server?.vencimiento ?? null;
+ }
+ function contractStatus(c: Contract) {
+   const money = financial(c);
+@@ -103,23 +116,10 @@ function contractStatus(c: Contract) {
+   return { label: "En consignación", tone: "success" };
+ }
+ function isUnsafe(c: Contract) {
+-  const transfer = c.milestones.find((m) => m.type === "traspaso");
+-  if (!transfer) return false;
+-  return (
+-    calculateBalance(
+-      c.price,
+-      c.commission,
+-      c.milestones
+-        .filter((m) => m.type === "pago" && m.date <= transfer.date)
+-        .map((m) => m.amount || 0),
+-    ).balance > 0
+-  );
++  return c.server?.traspaso_inseguro ?? false;
+ }
+ function isClaimable(c: Contract) {
+-  return (
+-    financial(c).balance > 0 &&
+-    (isUnsafe(c) || (!!deadline(c) && (deadline(c) as string) < todayISO()))
+-  );
++  return c.server?.reclamable ?? false;
+ }
+ function VehicleIcon({ index = 0 }: { index?: number }) {
+   return (
+@@ -205,18 +205,33 @@ function CarIllustration() {
+ }
+ 
+ export default function App() {
+-  const [contracts, setContracts] = useState<Contract[]>(loadContracts);
++  const [contracts, setContracts] = useState<Contract[]>([]);
++  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(
++    "loading",
++  );
++  const [loadError, setLoadError] = useState("");
+   const [page, setPage] = useState<Page>("dashboard");
+-  const [selectedId, setSelectedId] = useState("CT-001");
++  const [selectedId, setSelectedId] = useState("");
+   const [dialog, setDialog] = useState<Dialog>(null);
+   const [query, setQuery] = useState("");
+   const [mobileOpen, setMobileOpen] = useState(false);
+   const [toast, setToast] = useState("");
+-  const [storageWarn, setStorageWarn] = useState(false);
+   const searchRef = useRef<HTMLInputElement>(null);
++  const load = useCallback(async () => {
++    setLoadState("loading");
++    try {
++      const list = await loadWorkspace();
++      setContracts(list);
++      setSelectedId((id) => (list.some((c) => c.id === id) ? id : list[0]?.id ?? ""));
++      setLoadState("ready");
++    } catch (e) {
++      setLoadError((e as Error).message);
++      setLoadState("error");
++    }
++  }, []);
+   useEffect(() => {
+-    setStorageWarn(!saveContracts(contracts));
+-  }, [contracts]);
++    void load();
++  }, [load]);
+   useEffect(() => {
+     if (toast) {
+       const timer = setTimeout(() => setToast(""), 4500);
+@@ -262,15 +277,37 @@ export default function App() {
+     navigate("contracts", c.id);
+     setToast("Contrato creado. Ya puedes evaluar sus términos.");
+   }
+-  function addMilestone(m: Milestone) {
+-    setContracts((old) =>
+-      old.map((c) =>
+-        c.id === dialog?.id ? { ...c, milestones: [...c.milestones, m] } : c,
+-      ),
+-    );
++  function addMilestone(updated: Contract) {
++    setContracts((old) => old.map((c) => (c.id === updated.id ? updated : c)));
+     setDialog(null);
+     setToast("Hito guardado en la cronología.");
+   }
++  if (loadState !== "ready")
++    return (
++      <div className="app-shell">
++        <main role="status" aria-live="polite">
++          {loadState === "loading" ? (
++            <Empty
++              title="Conectando con el servidor…"
++              description="Cargando tus contratos de demostración."
++            />
++          ) : (
++            <Empty
++              title="No pudimos cargar tus datos"
++              description={loadError}
++              action={
++                <button
++                  className="button button-primary"
++                  onClick={() => void load()}
++                >
++                  Reintentar
++                </button>
++              }
++            />
++          )}
++        </main>
++      </div>
++    );
+   return (
+     <div className="app-shell">
+       {mobileOpen && (
+@@ -379,15 +416,9 @@ export default function App() {
+             <span />
+             <span>Espacio de demostración</span>
+             <span className="demo-label-detail">
+-              Tus datos se guardan solo en este navegador
++              Cuenta de demostración compartida · datos guardados en el servidor
+             </span>
+           </div>
+-          {storageWarn && (
+-            <div className="notice notice-warning">
+-              No se pudo guardar en el navegador. Mantén esta página abierta
+-              para conservar los cambios.
+-            </div>
+-          )}
+           {query ? (
+             <>
+               <div className="page-heading">
+@@ -1668,9 +1699,13 @@ function Claims({
+   onTrack: () => void;
+   notify: (s: string) => void;
+ }) {
+-  const [generated, setGenerated] = useState(false);
+-  const [audience, setAudience] = useState("automotora");
+-  useEffect(() => setGenerated(false), [c?.id]);
++  const [draft, setDraft] = useState<{
++    text: string;
++    notice: string;
++  } | null>(null);
++  const [audience, setAudience] = useState<Audience>("automotora");
++  const [busy, setBusy] = useState(false);
++  useEffect(() => setDraft(null), [c?.id, audience]);
+   if (!c)
+     return (
+       <Empty
+@@ -1682,43 +1717,24 @@ function Claims({
+   const eligible = isClaimable(c);
+   const due = deadline(c);
+   const events = [...c.milestones].sort((a, b) => a.date.localeCompare(b.date));
+-  const body = `${audience === "automotora" ? `A ${c.dealer}` : "Al Servicio Nacional del Consumidor (SERNAC)"}:\n\nPor medio de este documento, dejo constancia de los antecedentes relacionados con la consignación de mi vehículo ${c.vehicle}, patente ${c.plate}, registrada con ${c.dealer}.\n\nEl precio de venta registrado es ${formatCLP(c.price)}, con una comisión de ${c.commission}% (${formatCLP(balance.commission)}), lo que corresponde a un monto neto de ${formatCLP(balance.netAmount)}. A la fecha, los pagos registrados suman ${formatCLP(balance.totalPaid)}, con un saldo pendiente de ${formatCLP(balance.balance)}.${due ? ` La fecha de vencimiento de referencia es ${formatDate(due)}.` : ""}\n\n${isUnsafe(c) ? "En la cronología se registra un traspaso previo al pago completo. Solicito aclarar esta situación y entregar los comprobantes correspondientes.\n\n" : ""}Solicito informar por escrito el estado de la operación y, si corresponde, regularizar el saldo pendiente mediante el medio de pago acordado.\n\nAdjunto la cronología y las referencias a los comprobantes disponibles. Solicito una respuesta por escrito a este requerimiento.\n\nNombre del propietario: ____________________\nFecha: ${formatDate(todayISO())}\nDatos de contacto: ____________________`;
++  /** El borrador lo redacta el backend con los hechos y montos calculados en el servidor. */
++  async function generateDraft() {
++    setBusy(true);
++    try {
++      const result = await createClaim(c!.id, audience);
++      setDraft({ text: result.borrador, notice: result.aviso });
++    } catch (e) {
++      notify((e as Error).message);
++    } finally {
++      setBusy(false);
++    }
++  }
+   async function exportPDF() {
+     try {
+-      const { jsPDF } = await import("jspdf");
+-      const doc = new jsPDF();
+-      let y = 22;
+-      const write = (text: string, size = 10) => {
+-        doc.setFontSize(size);
+-        for (const line of doc.splitTextToSize(text, 170)) {
+-          if (y > 275) {
+-            doc.addPage();
+-            y = 22;
+-          }
+-          doc.text(line, 20, y);
+-          y += size * 0.52;
+-        }
+-        y += 5;
+-      };
+-      write("CONSIGNA | Informe y borrador de reclamo", 17);
+-      write("BORRADOR PARA REVISIÓN. No presentado ni enviado.", 10);
+-      write(`${c!.vehicle} | ${c!.plate} | ${c!.dealer}`, 12);
+-      write("CRONOLOGÍA", 12);
+-      events.forEach((m) =>
+-        write(
+-          `${formatDate(m.date)} - ${milestoneNames[m.type]}${m.amount ? ` - ${formatCLP(m.amount)}` : ""}\n${m.note}${m.evidence ? `\nComprobante: ${m.evidence.name}` : ""}`,
+-        ),
+-      );
+-      write("BORRADOR DE RECLAMO", 12);
+-      write(body);
+-      write(
+-        "Documento de demostración. No valida fundamentos normativos ni sustituye asesoría jurídica. Verificar el calendario y adjuntar los comprobantes antes de presentar.",
+-        9,
+-      );
+-      doc.save(`consigna-informe-${c!.id}.pdf`);
++      await downloadReportPdf(c!.id, audience);
+       notify("PDF descargado. Revísalo antes de presentarlo.");
+-    } catch {
+-      notify("No se pudo generar el PDF. Intenta nuevamente.");
++    } catch (e) {
++      notify((e as Error).message || "No se pudo generar el PDF. Intenta nuevamente.");
+     }
+   }
+   return (
+@@ -1821,7 +1837,7 @@ function Claims({
+               ].map(({ id, label, icon: Icon }) => (
+                 <button
+                   className={audience === id ? "recipient-active" : ""}
+-                  onClick={() => setAudience(id)}
++                  onClick={() => setAudience(id as Audience)}
+                   key={id}
+                 >
+                   <Icon size={17} />
+@@ -1829,17 +1845,17 @@ function Claims({
+                 </button>
+               ))}
+             </div>
+-            {generated ? (
++            {draft ? (
+               <>
+                 <div className="draft-paper">
+                   <span className="draft-tag">BORRADOR · NO PRESENTADO</span>
+                   <h3>Solicitud de regularización de pago</h3>
+-                  <p>{body}</p>
++                  <p>{draft.text}</p>
+                 </div>
+                 <div className="notice notice-warning">
+-                  Revisa los hechos y agrega tus datos. Este borrador no
+-                  contiene fundamentos jurídicos validados. Adjunta los
+-                  comprobantes antes de presentarlo.
++                  Revisa los hechos y agrega tus datos. Verifica los
++                  fundamentos citados (aún sin validación de un abogado) y
++                  adjunta los comprobantes antes de presentarlo.
+                 </div>
+                 <button
+                   className="button button-primary button-full"
+@@ -1859,9 +1875,14 @@ function Claims({
+                 </p>
+                 <button
+                   className="button button-primary"
+-                  onClick={() => setGenerated(true)}
++                  disabled={busy}
++                  onClick={() => void generateDraft()}
+                 >
+-                  <FileText size={16} />
++                  {busy ? (
++                    <LoaderCircle size={16} className="spin" />
++                  ) : (
++                    <FileText size={16} />
++                  )}
+                   Generar borrador
+                 </button>
+               </div>
+@@ -2055,32 +2076,20 @@ function NewContract({
+     }
+     setBusy(true);
+     try {
+-      const c: Contract = {
+-        id: `CT-${crypto.randomUUID().slice(0, 6).toUpperCase()}`,
++      const input = {
+         vehicle: String(data.get("vehicle")).trim(),
+         plate: String(data.get("plate")).trim().toUpperCase(),
+         dealer: String(data.get("dealer")).trim(),
+         price,
+         commission,
+         paymentDays: days,
+-        createdAt: todayISO(),
+         text,
+-        milestones: [],
+       };
+-      if (!c.vehicle || !c.dealer || !c.plate) {
++      if (!input.vehicle || !input.dealer || !input.plate) {
+         setError("Completa el vehículo, la patente y la automotora.");
+         return;
+       }
+-      if (evidence) {
+-        const id = await storeEvidenceFile(evidence);
+-        c.original = {
+-          id,
+-          name: evidence.name,
+-          size: evidence.size,
+-          date: todayISO(),
+-        };
+-      }
+-      onSave(c);
++      onSave(await createContract(input, evidence));
+     } catch (e) {
+       setError((e as Error).message);
+     } finally {
+@@ -2225,7 +2234,7 @@ function MilestoneForm({
+ }: {
+   contract: Contract;
+   close: () => void;
+-  onSave: (m: Milestone) => void;
++  onSave: (c: Contract) => void;
+ }) {
+   const [type, setType] = useState<MilestoneType>("pago");
+   const [file, setFile] = useState<File | null>(null);
+@@ -2304,19 +2313,16 @@ function MilestoneForm({
+     }
+     setBusy(true);
+     try {
+-      let evidence: Milestone["evidence"];
+-      if (file) {
+-        const id = await storeEvidenceFile(file);
+-        evidence = { id, name: file.name, size: file.size, date };
+-      }
+-      onSave({
+-        id: crypto.randomUUID(),
+-        type,
+-        date,
+-        note: String(data.get("note")).trim(),
+-        amount,
+-        evidence,
+-      });
++      onSave(
++        await saveMilestone(c.id, {
++          type,
++          date,
++          note: String(data.get("note")).trim(),
++          amount,
++          file,
++          confirm: Boolean(data.get("confirm")),
++        }),
++      );
+     } catch (e) {
+       setError((e as Error).message);
+     } finally {
+@@ -2414,12 +2420,12 @@ function MilestoneForm({
+           <Upload size={19} />
+           <div>
+             <strong>{file?.name || "Adjuntar comprobante"}</strong>
+-            <span>PDF, imagen o TXT · Máximo 10 MB</span>
++            <span>PDF, PNG, JPG o TXT · Máximo 10 MB</span>
+           </div>
+           <input
+             id="milestone-file"
+             type="file"
+-            accept=".pdf,.jpg,.jpeg,.png,.webp,.txt"
++            accept=".pdf,.jpg,.jpeg,.png,.txt"
+             onChange={(e) => {
+               setFile(e.target.files?.[0] || null);
+               setError("");
+diff --git a/src/lib/backend.ts b/src/lib/backend.ts
+new file mode 100644
+index 0000000..894dbbe
+--- /dev/null
++++ b/src/lib/backend.ts
+@@ -0,0 +1,355 @@
++import { seedContracts, type Contract, type MilestoneType } from "./store";
++
++/**
++ * Cliente HTTP del backend Flask. Modo demostración: no hay pantalla de login;
++ * al iniciar se pide un token a POST /api/auth/demo (requiere DEMO_MODE=1 en el
++ * backend) y se renueva solo cuando expira. Los plazos y montos los calcula el
++ * servidor; la interfaz solo los muestra.
++ */
++const API = (import.meta.env.VITE_API_URL as string | undefined) ?? "/api";
++const TOKEN_KEY = "consigna.token";
++
++export class ApiError extends Error {
++  constructor(
++    message: string,
++    readonly status: number,
++    readonly code?: string,
++  ) {
++    super(message);
++  }
++}
++
++/** Estado calculado por el backend (plazos, montos y secuencia segura). */
++export type ServerState = {
++  comision: number;
++  neto: number;
++  total_pagado: number;
++  saldo: number;
++  vencimiento: string;
++  pagado: boolean;
++  vencido: boolean;
++  parcial: boolean;
++  traspaso_inseguro: boolean;
++  estado: string;
++  reclamable: boolean;
++  avisos: string[];
++  calendario: string;
++};
++
++type ServerEvidence = {
++  id: string;
++  filename: string;
++  size: number;
++  created_at: string;
++};
++type ServerMilestone = {
++  id: string;
++  tipo: MilestoneType;
++  fecha: string;
++  monto: number | null;
++  nota: string;
++  evidencia_id: string | null;
++};
++type ServerContract = {
++  id: string;
++  vehiculo: string;
++  patente: string;
++  automotora: string;
++  precio: number;
++  comision_pct: number;
++  dias_pago: number;
++  texto: string;
++  creado: string;
++  hitos: ServerMilestone[];
++  evidencias: ServerEvidence[];
++  original: ServerEvidence | null;
++  estado: ServerState | null;
++};
++
++let token: string | null = null;
++try {
++  token = localStorage.getItem(TOKEN_KEY);
++} catch {
++  /* sin almacenamiento: se pide un token nuevo en cada visita */
++}
++
++async function readError(response: Response): Promise<ApiError> {
++  const body = await response.json().catch(() => ({}));
++  const message =
++    typeof body.error === "string" && body.error
++      ? body.error
++      : "El servidor no pudo completar la solicitud.";
++  return new ApiError(message, response.status, body.codigo);
++}
++
++async function startDemoSession(): Promise<string> {
++  let response: Response;
++  try {
++    response = await fetch(`${API}/auth/demo`, { method: "POST" });
++  } catch {
++    throw new ApiError(
++      "No se pudo conectar con el servidor. Verifica que el backend esté en ejecución.",
++      0,
++    );
++  }
++  if (response.status === 404)
++    throw new ApiError(
++      "El modo demostración está deshabilitado en el servidor (DEMO_MODE=1).",
++      404,
++    );
++  if (!response.ok) throw await readError(response);
++  const data = await response.json();
++  token = data.token as string;
++  try {
++    localStorage.setItem(TOKEN_KEY, token);
++  } catch {
++    /* ignorar */
++  }
++  return token;
++}
++
++async function request(
++  path: string,
++  init: RequestInit = {},
++  retry = true,
++): Promise<Response> {
++  const session = token ?? (await startDemoSession());
++  let response: Response;
++  try {
++    response = await fetch(`${API}${path}`, {
++      ...init,
++      headers: { ...(init.headers ?? {}), Authorization: `Bearer ${session}` },
++    });
++  } catch {
++    throw new ApiError(
++      "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo nuevamente.",
++      0,
++    );
++  }
++  if (response.status === 401 && retry) {
++    token = null; // token vencido o secreto cambiado: se renueva una vez
++    return request(path, init, false);
++  }
++  if (!response.ok) throw await readError(response);
++  return response;
++}
++
++const json = async <T>(path: string, init?: RequestInit): Promise<T> =>
++  (await request(path, init)).json() as Promise<T>;
++
++const santiagoDate = (iso: string) =>
++  new Intl.DateTimeFormat("en-CA", {
++    timeZone: "America/Santiago",
++    year: "numeric",
++    month: "2-digit",
++    day: "2-digit",
++  }).format(new Date(iso));
++
++function toContract(k: ServerContract): Contract {
++  const byId = new Map(k.evidencias.map((e) => [e.id, e]));
++  const evidence = (e: ServerEvidence) => ({
++    id: e.id,
++    name: e.filename,
++    size: e.size,
++    date: santiagoDate(e.created_at),
++  });
++  return {
++    id: k.id,
++    vehicle: k.vehiculo,
++    plate: k.patente,
++    dealer: k.automotora,
++    price: k.precio,
++    commission: k.comision_pct,
++    paymentDays: k.dias_pago,
++    createdAt: santiagoDate(k.creado),
++    text: k.texto,
++    original: k.original ? evidence(k.original) : undefined,
++    milestones: k.hitos.map((h) => {
++      const file = h.evidencia_id ? byId.get(h.evidencia_id) : undefined;
++      return {
++        id: h.id,
++        type: h.tipo,
++        date: h.fecha,
++        amount: h.monto ?? undefined,
++        note: h.nota,
++        evidence: file ? evidence(file) : undefined,
++      };
++    }),
++    server: k.estado ?? undefined,
++  };
++}
++
++export async function getContract(id: string): Promise<Contract> {
++  const d = await json<{
++    contrato: ServerContract;
++    hitos: ServerMilestone[];
++    estado: ServerState | null;
++    evidencias: ServerEvidence[];
++    original: ServerEvidence | null;
++  }>(`/contracts/${id}`);
++  return toContract({
++    ...d.contrato,
++    hitos: d.hitos,
++    estado: d.estado,
++    evidencias: d.evidencias,
++    original: d.original,
++  });
++}
++
++export async function listContracts(): Promise<Contract[]> {
++  const d = await json<{ contratos: ServerContract[] }>(
++    "/contracts?completo=1",
++  );
++  return d.contratos.map(toContract);
++}
++
++export type NewContractInput = {
++  vehicle: string;
++  plate: string;
++  dealer: string;
++  price: number;
++  commission: number;
++  paymentDays: number;
++  text: string;
++};
++
++export async function createContract(
++  input: NewContractInput,
++  original?: File | null,
++): Promise<Contract> {
++  const created = await json<{ id: string }>("/contracts", {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify({
++      vehiculo: input.vehicle,
++      patente: input.plate,
++      automotora: input.dealer,
++      precio: input.price,
++      comision_pct: input.commission,
++      dias_pago: input.paymentDays,
++      tipo_dias: "habiles",
++      texto: input.text,
++    }),
++  });
++  if (original) {
++    const form = new FormData();
++    form.append("archivo", original);
++    await request(`/contracts/${created.id}/original`, {
++      method: "PUT",
++      body: form,
++    });
++  }
++  return getContract(created.id);
++}
++
++export type NewMilestoneInput = {
++  type: MilestoneType;
++  date: string;
++  amount?: number;
++  note: string;
++  file?: File | null;
++  /** Deja constancia de un traspaso ocurrido sin pago completo. */
++  confirm?: boolean;
++};
++
++/** Registra el hito y devuelve el contrato actualizado con el estado del servidor. */
++export async function addMilestone(
++  contractId: string,
++  input: NewMilestoneInput,
++): Promise<Contract> {
++  const form = new FormData();
++  form.append("tipo", input.type);
++  form.append("fecha", input.date);
++  form.append("nota", input.note);
++  if (input.amount !== undefined) form.append("monto", String(input.amount));
++  if (input.confirm) form.append("confirmar", "true");
++  if (input.file) form.append("archivo", input.file);
++  await request(`/contracts/${contractId}/milestones`, {
++    method: "POST",
++    body: form,
++  });
++  return getContract(contractId);
++}
++
++export type Audience = "automotora" | "sernac";
++
++export async function createClaim(contractId: string, audience: Audience) {
++  return json<{ id: string; borrador: string; pasos: string[]; aviso: string }>(
++    `/contracts/${contractId}/claims`,
++    {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ audiencia: audience }),
++    },
++  );
++}
++
++function saveBlob(blob: Blob, name: string) {
++  const url = URL.createObjectURL(blob);
++  const anchor = document.createElement("a");
++  anchor.href = url;
++  anchor.download = name;
++  document.body.appendChild(anchor);
++  anchor.click();
++  anchor.remove();
++  setTimeout(() => URL.revokeObjectURL(url), 1000);
++}
++
++export async function downloadEvidence(id: string, name: string) {
++  const response = await request(`/evidences/${id}`);
++  saveBlob(await response.blob(), name);
++}
++
++export async function downloadReportPdf(
++  contractId: string,
++  audience: Audience,
++) {
++  const response = await request(
++    `/contracts/${contractId}/report.pdf?audiencia=${audience}`,
++  );
++  saveBlob(await response.blob(), `consigna-informe-${audience}.pdf`);
++}
++
++let workspaceLoad: Promise<Contract[]> | null = null;
++/** Carga los contratos; si la cuenta demo está vacía, la llena con casos de ejemplo.
++ * Las llamadas simultáneas (p. ej. el doble efecto de React en desarrollo) comparten
++ * una sola carga para no sembrar los ejemplos dos veces. */
++export function loadWorkspace(): Promise<Contract[]> {
++  workspaceLoad ??= loadOrSeed().finally(() => {
++    workspaceLoad = null;
++  });
++  return workspaceLoad;
++}
++
++async function loadOrSeed(): Promise<Contract[]> {
++  const existing = await listContracts();
++  if (existing.length) return existing;
++  for (const demo of [...seedContracts()].reverse()) {  // el más antiguo primero: la lista queda con CT-001 arriba
++    const created = await json<{ id: string }>("/contracts", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({
++        vehiculo: demo.vehicle,
++        patente: demo.plate,
++        automotora: demo.dealer,
++        precio: demo.price,
++        comision_pct: demo.commission,
++        dias_pago: demo.paymentDays,
++        tipo_dias: "habiles",
++        texto: demo.text,
++      }),
++    });
++    for (const m of demo.milestones) {
++      const form = new FormData();
++      form.append("tipo", m.type);
++      form.append("fecha", m.date);
++      form.append("nota", m.note);
++      if (m.amount !== undefined) form.append("monto", String(m.amount));
++      await request(`/contracts/${created.id}/milestones`, {
++        method: "POST",
++        body: form,
++      });
++    }
++  }
++  return listContracts();
++}
+diff --git a/src/lib/domain.ts b/src/lib/domain.ts
+index f770656..6e1ab1b 100644
+--- a/src/lib/domain.ts
++++ b/src/lib/domain.ts
+@@ -14,6 +14,10 @@ export type RiskAssessment = {
+   explanation: string;
+   alternative: string;
+   omitted: boolean;
++  /** Solo en respuestas del backend (criterios versionados). */
++  source_changed?: boolean;
++  criterion_status?: string;
++  references?: Array<{ label: string; title: string; url?: string | null }>;
+ };
+ 
+ const clp = new Intl.NumberFormat("es-CL", {
+diff --git a/src/lib/files.ts b/src/lib/files.ts
+index de89e54..4881855 100644
+--- a/src/lib/files.ts
++++ b/src/lib/files.ts
+@@ -1,8 +1,6 @@
+ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+ 
+ const MAX_FILE_SIZE = 10 * 1024 * 1024;
+-const DATABASE_NAME = "consigna-evidence";
+-const STORE_NAME = "files";
+ 
+ function validateFile(file: File): void {
+   if (!file.size)
+@@ -68,99 +66,3 @@ export async function readContractFile(file: File): Promise<string> {
+     await loadingTask?.destroy();
+   }
+ }
+-
+-function openDatabase(): Promise<IDBDatabase> {
+-  return new Promise((resolve, reject) => {
+-    if (!globalThis.indexedDB) {
+-      reject(
+-        new Error(
+-          "Tu navegador no permite guardar evidencias. Utiliza un navegador compatible.",
+-        ),
+-      );
+-      return;
+-    }
+-    const request = indexedDB.open(DATABASE_NAME, 1);
+-    request.onupgradeneeded = () => {
+-      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
+-        request.result.createObjectStore(STORE_NAME);
+-      }
+-    };
+-    request.onsuccess = () => resolve(request.result);
+-    request.onerror = () =>
+-      reject(
+-        new Error(
+-          "No se pudo abrir el almacenamiento de evidencias. Revisa los permisos de tu navegador.",
+-        ),
+-      );
+-    request.onblocked = () =>
+-      reject(
+-        new Error(
+-          "El almacenamiento está ocupado. Cierra otras pestañas de la aplicación e inténtalo nuevamente.",
+-        ),
+-      );
+-  });
+-}
+-
+-/** Save the original file in this browser's IndexedDB, not just its filename. */
+-export async function storeEvidenceFile(file: File): Promise<string> {
+-  validateFile(file);
+-  const database = await openDatabase();
+-  const id = crypto.randomUUID();
+-  try {
+-    await new Promise<void>((resolve, reject) => {
+-      const transaction = database.transaction(STORE_NAME, "readwrite");
+-      transaction.objectStore(STORE_NAME).put(file, id);
+-      transaction.oncomplete = () => resolve();
+-      transaction.onerror = () =>
+-        reject(
+-          new Error(
+-            "No se pudo guardar el archivo. Comprueba que haya espacio disponible en el navegador.",
+-          ),
+-        );
+-      transaction.onabort = () =>
+-        reject(
+-          new Error(
+-            "No se pudo completar el guardado del archivo. Inténtalo nuevamente.",
+-          ),
+-        );
+-    });
+-    return id;
+-  } finally {
+-    database.close();
+-  }
+-}
+-
+-export async function getEvidenceFile(id: string): Promise<File | undefined> {
+-  const database = await openDatabase();
+-  try {
+-    return await new Promise<File | undefined>((resolve, reject) => {
+-      const transaction = database.transaction(STORE_NAME, "readonly");
+-      const request = transaction.objectStore(STORE_NAME).get(id);
+-      request.onsuccess = () => resolve(request.result as File | undefined);
+-      request.onerror = () =>
+-        reject(new Error("No se pudo recuperar la evidencia guardada."));
+-    });
+-  } finally {
+-    database.close();
+-  }
+-}
+-
+-export async function downloadEvidence(
+-  id: string,
+-  name: string,
+-): Promise<void> {
+-  const file = await getEvidenceFile(id);
+-  if (!file) {
+-    throw new Error(
+-      "Este archivo no está disponible en este navegador. Vuelve a cargar la evidencia original.",
+-    );
+-  }
+-  const url = URL.createObjectURL(file);
+-  const anchor = document.createElement("a");
+-  anchor.href = url;
+-  anchor.download = name || file.name;
+-  document.body.appendChild(anchor);
+-  anchor.click();
+-  anchor.remove();
+-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+-}
+diff --git a/src/lib/store.ts b/src/lib/store.ts
+index 8f990f4..be27309 100644
+--- a/src/lib/store.ts
++++ b/src/lib/store.ts
+@@ -1,3 +1,4 @@
++import type { ServerState } from "./backend";
+ export type MilestoneType = "entrega" | "venta" | "pago" | "traspaso";
+ export interface Evidence {
+   id: string;
+@@ -25,6 +26,8 @@ export interface Contract {
+   text: string;
+   original?: Evidence;
+   milestones: Milestone[];
++  /** Estado calculado por el backend (existe una vez registrada la venta). */
++  server?: ServerState;
+ }
+ export const todayISO = () =>
+   new Intl.DateTimeFormat("en-CA", {
+@@ -122,27 +125,3 @@ export function seedContracts(): Contract[] {
+     },
+   ];
+ }
+-export function loadContracts(): Contract[] {
+-  try {
+-    const saved = localStorage.getItem("consigna.contracts.v1");
+-    if (saved) {
+-      const value = JSON.parse(saved);
+-      if (
+-        Array.isArray(value) &&
+-        value.every((c) => c.id && c.vehicle && Array.isArray(c.milestones))
+-      )
+-        return value;
+-    }
+-  } catch {
+-    /* A fresh demo remains usable if storage is unavailable. */
+-  }
+-  return seedContracts();
+-}
+-export function saveContracts(contracts: Contract[]): boolean {
+-  try {
+-    localStorage.setItem("consigna.contracts.v1", JSON.stringify(contracts));
+-    return true;
+-  } catch {
+-    return false;
+-  }
+-}
+diff --git a/tests/e2e.spec.ts b/tests/e2e.spec.ts
+index 802de27..35bef86 100644
+--- a/tests/e2e.spec.ts
++++ b/tests/e2e.spec.ts
+@@ -1,5 +1,5 @@
+ import { test, expect } from "@playwright/test";
+-import type { Page } from "@playwright/test";
++import type { APIRequestContext, Page } from "@playwright/test";
+ import { readFile } from "node:fs/promises";
+ import { jsPDF } from "jspdf";
+ 
+@@ -14,14 +14,45 @@ const navigation = (page: Page, label: string) =>
+   page
+     .getByRole("navigation")
+     .getByRole("button", { name: label, exact: true });
+-const savedContracts = (page: Page): Promise<SavedContract[]> =>
+-  page.evaluate(() =>
+-    JSON.parse(localStorage.getItem("consigna.contracts.v1") || "[]"),
+-  );
++// Los datos viven en el backend (cuenta demo compartida): se leen y se limpian por API.
++const sessionHeaders = async (request: APIRequestContext) => {
++  const response = await request.post("/api/auth/demo");
++  expect(response.ok()).toBe(true);
++  return { Authorization: `Bearer ${(await response.json()).token}` };
++};
++const savedContracts = async (
++  request: APIRequestContext,
++): Promise<SavedContract[]> => {
++  const response = await request.get("/api/contracts?completo=1", {
++    headers: await sessionHeaders(request),
++  });
++  const { contratos } = await response.json();
++  return contratos.map((c: any) => ({
++    id: c.id,
++    vehicle: c.vehiculo,
++    original: c.original ? { id: c.original.id } : undefined,
++    milestones: c.hitos.map((m: any) => ({
++      type: m.tipo,
++      amount: m.monto ?? undefined,
++      evidence: m.evidencia_id ? { id: m.evidencia_id } : undefined,
++    })),
++  }));
++};
++const idOf = async (request: APIRequestContext, vehicle: string) =>
++  (await savedContracts(request)).find((c) => c.vehicle === vehicle)!.id;
++async function resetWorkspace(request: APIRequestContext) {
++  const headers = await sessionHeaders(request);
++  for (const c of await savedContracts(request))
++    await request.delete(`/api/contracts/${c.id}`, { headers });
++}
+ const contractText =
+   "Precio mínimo $9.000.000. Comisión 5%. Pago a 15 días hábiles mediante transferencia bancaria. Rebaja con autorización escrita. Traspaso después del pago completo. No hay penalidades.";
+ 
+-async function createContract(page: Page, vehicle = "QA Auto 2026") {
++async function createContract(
++  page: Page,
++  request: APIRequestContext,
++  vehicle = "QA Auto 2026",
++) {
+   await page
+     .getByRole("button", { name: "Nuevo contrato", exact: true })
+     .click();
+@@ -34,8 +65,8 @@ async function createContract(page: Page, vehicle = "QA Auto 2026") {
+     .getByRole("button", { name: "Crear contrato", exact: true })
+     .click();
+   await expect(dialog).toBeHidden();
+-  await expect.poll(async () => (await savedContracts(page)).length).toBe(5);
+-  return (await savedContracts(page)).find(
++  await expect.poll(async () => (await savedContracts(request)).length).toBe(5);
++  return (await savedContracts(request)).find(
+     (contract) => contract.vehicle === vehicle,
+   )!;
+ }
+@@ -49,8 +80,9 @@ async function openMilestone(page: Page, type: string) {
+   return dialog;
+ }
+ 
+-// Every test receives a fresh browser context, localStorage and IndexedDB.
+-test.beforeEach(async ({ page }) => {
++// Cada prueba parte de una cuenta demo vacía: al abrir la página se vuelven a cargar los 4 contratos de ejemplo.
++test.beforeEach(async ({ page, request }) => {
++  await resetWorkspace(request);
+   const errors: string[] = [];
+   page.on("pageerror", (error) => errors.push(error.message));
+   page.on("console", (message) => {
+@@ -71,8 +103,9 @@ test.afterEach(async ({ page }) => {
+ 
+ test("a new contract has no fabricated milestones and persists after reload", async ({
+   page,
++  request,
+ }) => {
+-  const contract = await createContract(page);
++  const contract = await createContract(page, request);
+   expect(contract.milestones).toEqual([]);
+   expect(contract.original).toBeUndefined();
+   await page.getByRole("textbox", { name: "Buscar contratos" }).fill("QA Auto");
+@@ -81,7 +114,7 @@ test("a new contract has no fabricated milestones and persists after reload", as
+   ).toBeVisible();
+   await expect(page.locator("tbody tr")).toHaveCount(1);
+   await page.reload();
+-  const persisted = (await savedContracts(page)).find(
++  const persisted = (await savedContracts(request)).find(
+     (item) => item.id === contract.id,
+   );
+   expect(persisted?.milestones).toEqual([]);
+@@ -96,8 +129,9 @@ test("a new contract has no fabricated milestones and persists after reload", as
+ 
+ test("milestones require delivery and sale; partial payments keep the transfer warning", async ({
+   page,
++  request,
+ }) => {
+-  const contract = await createContract(page);
++  const contract = await createContract(page, request);
+   await navigation(page, "Seguimiento").click();
+   let dialog = await openMilestone(page, "pago");
+   await dialog.getByLabel("Monto recibido (CLP)").fill("3000000");
+@@ -146,7 +180,7 @@ test("milestones require delivery and sale; partial payments keep the transfer w
+   ).toBeVisible();
+   await dialog.getByRole("button", { name: "Guardar hito" }).click();
+   expect(
+-    (await savedContracts(page)).find((item) => item.id === contract.id)
++    (await savedContracts(request)).find((item) => item.id === contract.id)
+       ?.milestones,
+   ).toHaveLength(3);
+   await expect(dialog.getByRole("checkbox")).not.toBeChecked();
+@@ -162,11 +196,12 @@ test("milestones require delivery and sale; partial payments keep the transfer w
+ 
+ test("overdue reports have the correct balance and download a PDF; complete payments have no claim", async ({
+   page,
++  request,
+ }) => {
+   await navigation(page, "Informes y reclamos").click();
+   await page
+     .getByRole("combobox", { name: "Seleccionar contrato" })
+-    .selectOption("CT-003");
++    .selectOption(await idOf(request, "Nissan Versa"));
+   await expect(page.locator(".claim-amount strong")).toHaveText("$5.550.000");
+   await page
+     .getByRole("button", { name: "Generar borrador", exact: true })
+@@ -179,13 +214,13 @@ test("overdue reports have the correct balance and download a PDF; complete paym
+     })
+     .click();
+   const download = await downloadEvent;
+-  expect(download.suggestedFilename()).toContain("CT-003");
++  expect(download.suggestedFilename()).toContain("consigna-informe");
+   const bytes = await readFile((await download.path())!);
+   expect(bytes.subarray(0, 4).toString()).toBe("%PDF");
+   expect(bytes.length).toBeGreaterThan(1500);
+   await page
+     .getByRole("combobox", { name: "Seleccionar contrato" })
+-    .selectOption("CT-004");
++    .selectOption(await idOf(request, "Suzuki Swift"));
+   await expect(
+     page.getByRole("heading", {
+       name: "No se detecta un incumplimiento reclamable",
+@@ -208,7 +243,8 @@ test("contract evaluation handles pasted text, TXT, selectable PDFs and rejects
+   await page
+     .getByRole("button", { name: "Evaluar términos", exact: true })
+     .click();
+-  await expect(page.locator(".risk-card")).toHaveCount(7);
++  // Con el backend activo se evalúan sus 9 criterios versionados (sin backend, las 7 reglas locales).
++  await expect(page.locator(".risk-card")).toHaveCount(9);
+   await expect(
+     page.getByText("Término no encontrado", { exact: true }).first(),
+   ).toBeVisible();
+@@ -254,8 +290,9 @@ test("contract evaluation handles pasted text, TXT, selectable PDFs and rejects
+ 
+ test("uploaded evidence remains downloadable after reloading the browser", async ({
+   page,
++  request,
+ }) => {
+-  const contract = await createContract(page);
++  const contract = await createContract(page, request);
+   await navigation(page, "Seguimiento").click();
+   const dialog = await openMilestone(page, "entrega");
+   const original = "Comprobante QA: entrega del vehículo con inventario.";
+@@ -271,7 +308,7 @@ test("uploaded evidence remains downloadable after reloading the browser", async
+   await expect
+     .poll(async () =>
+       Boolean(
+-        (await savedContracts(page)).find((item) => item.id === contract.id)
++        (await savedContracts(request)).find((item) => item.id === contract.id)
+           ?.milestones[0]?.evidence?.id,
+       ),
+     )
