@@ -67,10 +67,14 @@ def create_app(config: dict | None = None) -> Flask:
         "SMTP_PASSWORD": os.environ.get("SMTP_PASSWORD", ""),
         "SMTP_FROM": os.environ.get("SMTP_FROM", ""),
         "ALERT_INTERVAL_MINUTES": float(os.environ.get("ALERT_INTERVAL_MINUTES", "60")),
+        # Modo demostración: la interfaz entra sola con una cuenta compartida, sin pantalla de login.
+        "DEMO_MODE": os.environ.get("DEMO_MODE", "0").lower() in ("1", "true", "si", "sí", "on"),
+        "DEMO_EMAIL": os.environ.get("DEMO_EMAIL", "demo@consigna.local"),
         "TODAY": None, "SENDER": None,
     }
     cfg.update(config or {})
     app = Flask(__name__)
+    app.config["DEMO_MODE"], app.config["DEMO_EMAIL"] = bool(cfg["DEMO_MODE"]), cfg["DEMO_EMAIL"]
     app.json.default = _json_default
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD + 1024 * 1024
     hosts = {h.strip() for h in cfg["ALLOWED_HOSTS"].split(",") if h.strip()}
