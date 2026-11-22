@@ -48,9 +48,9 @@ import {
   addBusinessDays,
   formatCLP,
   formatDate,
-  assessContractText,
 } from "./lib/domain";
 import type { RiskAssessment } from "./lib/domain";
+import { analyzeContract, type AnalysisResult } from "./lib/api";
 import { loadContracts, saveContracts, todayISO } from "./lib/store";
 import type { Contract, Milestone, MilestoneType } from "./lib/store";
 import {
@@ -1295,7 +1295,8 @@ function Evaluation({
 }) {
   const current = contracts.find((c) => c.id === selectedId);
   const [text, setText] = useState(current?.text || "");
-  const [results, setResults] = useState<RiskAssessment[] | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const results: RiskAssessment[] | null = analysis?.findings ?? null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [fileName, setFileName] = useState("");
@@ -1304,7 +1305,7 @@ function Evaluation({
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setText(current?.text || "");
-    setResults(null);
+    setAnalysis(null);
     setFileName("");
     setError("");
   }, [current?.id]);
@@ -1316,14 +1317,14 @@ function Evaluation({
       const content = await readContractFile(file);
       setText(content);
       setFileName(file.name);
-      setResults(null);
+      setAnalysis(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
-  function evaluate() {
+  async function evaluate() {
     setError("");
     if (text.trim().length < 40) {
       setError(
@@ -1331,8 +1332,15 @@ function Evaluation({
       );
       return;
     }
-    setResults(assessContractText(text));
-    setOpenRisk(null);
+    setBusy(true);
+    try {
+      setAnalysis(await analyzeContract(text));
+      setOpenRisk(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
   const counts = results
     ? {
@@ -1435,7 +1443,7 @@ function Evaluation({
             maxLength={100000}
             onChange={(e) => {
               setText(e.target.value);
-              setResults(null);
+              setAnalysis(null);
             }}
             placeholder="Precio mínimo, comisión, plazo de pago, condiciones de rebaja, traspaso y penalidades…"
           />
@@ -1450,7 +1458,7 @@ function Evaluation({
           <button
             className="button button-primary button-full"
             disabled={busy}
-            onClick={evaluate}
+            onClick={() => void evaluate()}
           >
             <ShieldCheck size={17} />
             Evaluar términos
@@ -1458,7 +1466,8 @@ function Evaluation({
           </button>
           <span className="input-footnote">
             <Shield size={13} />
-            El archivo se procesa en tu navegador.
+            El archivo se lee en tu navegador; el texto se envía al servidor
+            solo para evaluarlo y no se guarda.
           </span>
         </section>
         <div className="evaluation-output">
@@ -1471,6 +1480,29 @@ function Evaluation({
                 </div>
                 <span>{results.length} términos evaluados</span>
               </div>
+              {analysis?.origin === "server" ? (
+                <div className="notice" role="status">
+                  <ShieldCheck size={19} />
+                  <p>
+                    Criterios versión {analysis.criteriaVersion}
+                    {analysis.sourcesLastChecked
+                      ? ` · fuentes SERNAC revisadas el ${new Date(analysis.sourcesLastChecked).toLocaleDateString("es-CL")}`
+                      : " · fuentes aún sin revisar"}
+                    .
+                    {analysis.reviewPending &&
+                      " Alguna fuente cambió desde la última revisión de los criterios: los resultados marcados podrían estar desactualizados."}
+                  </p>
+                </div>
+              ) : (
+                <div className="notice" role="status">
+                  <CircleAlert size={19} />
+                  <p>
+                    No se pudo conectar con el servidor de criterios. Se
+                    muestran reglas locales de demostración, que no se
+                    actualizan con la normativa.
+                  </p>
+                </div>
+              )}
               <div className="risk-summary">
                 <div>
                   <strong>{counts.alto}</strong>
@@ -1539,6 +1571,35 @@ function Evaluation({
                           </span>
                           <p>{r.alternative}</p>
                         </div>
+                        {r.source_changed && (
+                          <p className="subtle">
+                            Una fuente de este criterio cambió y aún no fue
+                            revisada.
+                          </p>
+                        )}
+                        {r.references && r.references.length > 0 && (
+                          <p className="subtle">
+                            Fuentes:{" "}
+                            {r.references.map((ref, i) => (
+                              <span key={ref.label + i}>
+                                {i > 0 && " · "}
+                                {ref.url ? (
+                                  <a
+                                    href={ref.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    {ref.title}
+                                  </a>
+                                ) : (
+                                  ref.title
+                                )}
+                              </span>
+                            ))}
+                            {r.criterion_status === "pending_legal_review" &&
+                              " (criterio pendiente de validación jurídica)"}
+                          </p>
+                        )}
                       </div>
                     )}
                   </section>
@@ -1561,7 +1622,7 @@ function Evaluation({
               <span className="eyebrow">MÁS CLARIDAD, MEJORES DECISIONES</span>
               <h2>Los detalles importan.</h2>
               <p>
-                Revisaremos siete términos para ayudarte
+                Revisaremos los términos clave para ayudarte
                 <br />a entender qué estás acordando.
               </p>
               <div className="terms-grid">
